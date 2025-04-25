@@ -93,7 +93,57 @@ jobs:
         }
 
     - name: Set up MSBuild and VS Environment
-      uses: microsoft/setup-msbuild@v1.3 # Sets up MSBuild and VS dev environment
+      uses: microsoft/setup-msbuild@v2 # Sets up MSBuild and VS dev environment
+
+    - name: Set VCVARSALL environment variable
+      id: set_vcvars
+      shell: powershell
+      run: |
+        $vcvarsPath = ""
+        # Try finding via VCINSTALLDIR (often set by VS setup actions)
+        if ($env:VCINSTALLDIR) {
+          $potentialPath = Join-Path $env:VCINSTALLDIR "Auxiliary\Build\vcvars64.bat"
+          if (Test-Path $potentialPath) {
+            $vcvarsPath = $potentialPath
+            echo "Found vcvarsall.bat via VCINSTALLDIR: $vcvarsPath"
+          }
+        }
+
+        # Fallback to default VS 2022 Enterprise path if not found yet
+        if (-not $vcvarsPath) {
+          $potentialPath = "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+          if (Test-Path $potentialPath) {
+            $vcvarsPath = $potentialPath
+            echo "Found vcvarsall.bat via default VS 2022 Enterprise path: $vcvarsPath"
+          }
+        }
+
+        # Fallback to default VS 2022 Community path
+        if (-not $vcvarsPath) {
+            $potentialPath = "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat"
+            if (Test-Path $potentialPath) {
+                $vcvarsPath = $potentialPath
+                echo "Found vcvarsall.bat via default VS 2022 Community path: $vcvarsPath"
+            }
+        }
+
+        # Fallback to (x86) path (less likely for VS 2022 but check just in case)
+        if (-not $vcvarsPath) {
+          $potentialPath = "C:\Program Files (x86)\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+           if (Test-Path $potentialPath) {
+            $vcvarsPath = $potentialPath
+            echo "Found vcvarsall.bat via (x86) VS 2022 Enterprise path: $vcvarsPath"
+          }
+        }
+
+        if ($vcvarsPath) {
+          echo "Setting VCVARSALL environment variable."
+          # Use GitHub Actions environment file syntax to set for subsequent steps
+          echo "VCVARSALL=$vcvarsPath" >> $env:GITHUB_ENV
+        } else {
+          echo "ERROR: Could not locate vcvars64.bat. Build might fail."
+          # Optionally fail the job: exit 1
+        }
 
     - name: Run Build Script
       env:
@@ -102,6 +152,7 @@ jobs:
         PREFIX_ENV: C:\ServBay\packages\apache
         # VCVARSALL should be implicitly set by setup-msbuild, but double-check if issues arise
       run: |
+        echo "VCVARSALL is set to: %VCVARSALL%"
         echo "Starting build_all.bat..."
         call build_all.bat
       shell: cmd # Use cmd to run the batch script
