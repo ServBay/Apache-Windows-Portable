@@ -67,7 +67,8 @@ jobs:
             ${{ env.VCPKG_INSTALLATION_ROOT }}/buildtrees/
             ${{ env.VCPKG_INSTALLATION_ROOT }}/downloads/
             !${{ env.VCPKG_INSTALLATION_ROOT }}/downloads/*.tmp
-          key: ${{ runner.os }}-vcpkg-preinstalled-${{ hashFiles('.github/workflows/*.yml') }}
+          key: ${{ runner.os }}-vcpkg-preinstalled-1234567890 }}
+        #   key: ${{ runner.os }}-vcpkg-preinstalled-${{ hashFiles('.github/workflows/*.yml') }}
           restore-keys: |
             ${{ runner.os }}-vcpkg-preinstalled-
 
