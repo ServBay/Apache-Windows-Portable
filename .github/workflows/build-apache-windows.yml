@@ -104,7 +104,7 @@ jobs:
           Invoke-WebRequest -Uri $url -OutFile apr.tar.gz
           tar -xzf apr.tar.gz
           Move-Item -Path "apr-${{ env.APR_VERSION }}" -Destination "httpd-${{ env.APACHE_VERSION }}/srclib/apr" -Force
-          if (-not (Test-Path "httpd-${{ env.APACHE_VERSION }}/srclib/apr")) { Write-Error "Failed to move APR source"; exit 1 }
+          if (-not (Test-Path "httpd-${{ env.APACHE_VERSION }}/srclib/apr/include")) { Write-Error "Failed to move APR source"; exit 1 }
 
       - name: Download APR-Util source
         shell: pwsh
@@ -115,7 +115,7 @@ jobs:
           Invoke-WebRequest -Uri $url -OutFile apr-util.tar.gz
           tar -xzf apr-util.tar.gz
           Move-Item -Path "apr-util-${{ env.APR_UTIL_VERSION }}" -Destination "httpd-${{ env.APACHE_VERSION }}/srclib/apr-util" -Force
-          if (-not (Test-Path "httpd-${{ env.APACHE_VERSION }}/srclib/apr-util")) { Write-Error "Failed to move APR-Util source"; exit 1 }
+          if (-not (Test-Path "httpd-${{ env.APACHE_VERSION }}/srclib/apr-util/include")) { Write-Error "Failed to move APR-Util source"; exit 1 }
 
       - name: Configure Apache with CMake
         shell: cmd
@@ -133,8 +133,8 @@ jobs:
               -DCMAKE_INSTALL_PREFIX="${{ env.INSTALL_DIR }}" ^
               -DCMAKE_TOOLCHAIN_FILE="%VCPKG_TOOLCHAIN_FILE%" ^
               -DVCPKG_TARGET_TRIPLET="${{ env.VCPKG_TRIPLET }}" ^
-              -DAPR_INCLUDE_DIR="../srclib/apr/include" ^
-              -DAPU_INCLUDE_DIR="../srclib/apr-util/include" ^
+              -DAPR_INCLUDE_DIR="${{ env.SOURCE_DIR }}/httpd-${{ env.APACHE_VERSION }}/srclib/apr/include" ^
+              -DAPU_INCLUDE_DIR="${{ env.SOURCE_DIR }}/httpd-${{ env.APACHE_VERSION }}/srclib/apr-util/include" ^
               -DINSTALL_LAYOUT="Relocatable" ^
               -DENABLE_MODULES="shared" ^
               -DENABLE_MPMS="winnt" ^
