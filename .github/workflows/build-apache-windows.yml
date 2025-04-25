@@ -1,4 +1,4 @@
-name: Build Apache Portable (Windows x64)
+name: Build Apache Portable (Windows x64 - Using Runner Env)
 
 on:
   workflow_dispatch:
@@ -20,9 +20,9 @@ env:
   # 构建目录和安装目录
   SOURCE_DIR: ${{ github.workspace }}/source # Directory to store downloaded sources
   INSTALL_DIR: ${{ github.workspace }}/apache-install # Temporary install dir before packaging
-  VCPKG_ROOT: ${{ github.workspace }}/vcpkg
-  VCPKG_COMMIT_ID: '760bfd0c8d7c89ec640aec4df89418b7c2745605' # Pin vcpkg commit for reproducibility, check for newer stable commits
+  # Use the vcpkg triplet provided by the runner environment
   VCPKG_TRIPLET: x64-windows
+  # VCPKG_INSTALLATION_ROOT is usually set by the runner, e.g., C:\vcpkg
 
 jobs:
   build:
@@ -42,42 +42,43 @@ jobs:
 
       - name: Setup MSVC developer environment
         uses: ilammy/msvc-dev-cmd@v1
+        # This action sets up the necessary compiler paths
 
-      # --- vcpkg Setup ---
-      - name: Checkout vcpkg
-        uses: actions/checkout@v4
-        with:
-          repository: 'microsoft/vcpkg'
-          ref: ${{ env.VCPKG_COMMIT_ID }}
-          path: ${{ env.VCPKG_ROOT }}
-          # fetch-depth: 0 # Uncomment if you need history, otherwise 1 is faster
-
-      - name: Bootstrap vcpkg
+      # --- Use Pre-installed vcpkg ---
+      - name: Verify vcpkg Environment
         run: |
-          cd ${{ env.VCPKG_ROOT }}
-          .\bootstrap-vcpkg.bat -disableMetrics
+          echo "VCPKG_INSTALLATION_ROOT is: %VCPKG_INSTALLATION_ROOT%"
+          if not defined VCPKG_INSTALLATION_ROOT (
+            echo "Error: VCPKG_INSTALLATION_ROOT is not set by the runner!"
+            exit /b 1
+          )
+          echo "Attempting to run vcpkg from %VCPKG_INSTALLATION_ROOT%"
+          "%VCPKG_INSTALLATION_ROOT%\vcpkg" version
         shell: cmd
 
+      # Optional: Cache vcpkg artifacts based on runner's vcpkg root
+      # Note: The key doesn't track the exact vcpkg version, but caches based on OS and workflow files
       - name: Cache vcpkg packages
         uses: actions/cache@v4
         with:
           path: |
-            ${{ env.VCPKG_ROOT }}/installed/
-            ${{ env.VCPKG_ROOT }}/packages/
-            ${{ env.VCPKG_ROOT }}/buildtrees/
-            ${{ env.VCPKG_ROOT }}/downloads/
-            !${{ env.VCPKG_ROOT }}/downloads/*.tmp
-          key: ${{ runner.os }}-vcpkg-${{ env.VCPKG_COMMIT_ID }}-${{ hashFiles(format('{0}/scripts/ports.cmake', env.VCPKG_ROOT)) }}-${{ hashFiles('**/vcpkg.json', '.github/workflows/*.yml') }}
+            ${{ env.VCPKG_INSTALLATION_ROOT }}/installed/
+            ${{ env.VCPKG_INSTALLATION_ROOT }}/packages/
+            ${{ env.VCPKG_INSTALLATION_ROOT }}/buildtrees/
+            ${{ env.VCPKG_INSTALLATION_ROOT }}/downloads/
+            !${{ env.VCPKG_INSTALLATION_ROOT }}/downloads/*.tmp
+          key: ${{ runner.os }}-vcpkg-preinstalled-${{ hashFiles('.github/workflows/*.yml') }}
           restore-keys: |
-            ${{ runner.os }}-vcpkg-${{ env.VCPKG_COMMIT_ID }}-
+            ${{ runner.os }}-vcpkg-preinstalled-
 
-      - name: Install Dependencies via vcpkg
+      - name: Install Dependencies via pre-installed vcpkg
         run: |
-          ${{ env.VCPKG_ROOT }}/vcpkg install openssl pcre2 zlib brotli libxml2 nghttp2 --triplet ${{ env.VCPKG_TRIPLET }} --clean-after-build
+          echo "Using vcpkg from %VCPKG_INSTALLATION_ROOT%"
+          "%VCPKG_INSTALLATION_ROOT%\vcpkg" install openssl pcre2 zlib brotli libxml2 nghttp2 --triplet ${{ env.VCPKG_TRIPLET }} --clean-after-build
         shell: cmd
-      # --- End vcpkg Setup ---
+      # --- End vcpkg ---
 
-      - name: Install Strawberry Perl (needed for some build scripts)
+      - name: Install Strawberry Perl
         run: choco install strawberryperl --yes --no-progress
         shell: cmd
 
@@ -93,10 +94,7 @@ jobs:
           Write-Host "Downloading Apache from $url"
           Invoke-WebRequest -Uri $url -OutFile httpd.tar.gz
           tar -xzf httpd.tar.gz
-          if (-not (Test-Path "httpd-${{ env.APACHE_VERSION }}")) {
-            Write-Error "Failed to extract Apache source"
-            exit 1
-          }
+          if (-not (Test-Path "httpd-${{ env.APACHE_VERSION }}")) { Write-Error "Failed to extract Apache source"; exit 1 }
 
       - name: Download APR source
         shell: pwsh
@@ -107,10 +105,7 @@ jobs:
           Invoke-WebRequest -Uri $url -OutFile apr.tar.gz
           tar -xzf apr.tar.gz
           Move-Item -Path "apr-${{ env.APR_VERSION }}" -Destination "httpd-${{ env.APACHE_VERSION }}/srclib/apr" -Force
-          if (-not (Test-Path "httpd-${{ env.APACHE_VERSION }}/srclib/apr")) {
-            Write-Error "Failed to move APR source"
-            exit 1
-          }
+          if (-not (Test-Path "httpd-${{ env.APACHE_VERSION }}/srclib/apr")) { Write-Error "Failed to move APR source"; exit 1 }
 
       - name: Download APR-Util source
         shell: pwsh
@@ -121,10 +116,7 @@ jobs:
           Invoke-WebRequest -Uri $url -OutFile apr-util.tar.gz
           tar -xzf apr-util.tar.gz
           Move-Item -Path "apr-util-${{ env.APR_UTIL_VERSION }}" -Destination "httpd-${{ env.APACHE_VERSION }}/srclib/apr-util" -Force
-          if (-not (Test-Path "httpd-${{ env.APACHE_VERSION }}/srclib/apr-util")) {
-            Write-Error "Failed to move APR-Util source"
-            exit 1
-          }
+          if (-not (Test-Path "httpd-${{ env.APACHE_VERSION }}/srclib/apr-util")) { Write-Error "Failed to move APR-Util source"; exit 1 }
 
       - name: Configure Apache with CMake
         shell: cmd
@@ -133,27 +125,32 @@ jobs:
           mkdir build
           cd build
 
+          rem Ensure VCPKG_INSTALLATION_ROOT is available for CMake
+          echo "Using CMake Toolchain: %VCPKG_INSTALLATION_ROOT%\scripts\buildsystems\vcpkg.cmake"
+
           cmake .. ^
               -G "Visual Studio 17 2022" -A x64 ^
               -DCMAKE_INSTALL_PREFIX="${{ env.INSTALL_DIR }}" ^
-              -DCMAKE_TOOLCHAIN_FILE="${{ env.VCPKG_ROOT }}/scripts/buildsystems/vcpkg.cmake" ^
+              -DCMAKE_TOOLCHAIN_FILE="%VCPKG_INSTALLATION_ROOT%\scripts\buildsystems\vcpkg.cmake" ^
               -DVCPKG_TARGET_TRIPLET="${{ env.VCPKG_TRIPLET }}" ^
               -DINSTALL_LAYOUT="Relocatable" ^
               -DENABLE_MODULES="shared" ^
               -DENABLE_MPMS="winnt" ^
               -DENABLE_SSL="ON" ^
               -DENABLE_HTTP2="ON" ^
-              -DOPENSSL_ROOT_DIR="${{ env.VCPKG_ROOT }}/installed/${{ env.VCPKG_TRIPLET }}" ^
               -DENABLE_BROTLI="ON" ^
-              -DBROTLI_ROOT_DIR="${{ env.VCPKG_ROOT }}/installed/${{ env.VCPKG_TRIPLET }}" ^
               -DENABLE_XML="ON" ^
-              -DLIBXML2_ROOT_DIR="${{ env.VCPKG_ROOT }}/installed/${{ env.VCPKG_TRIPLET }}" ^
               -DENABLE_NGHTTP2="ON" ^
-              -DNGHTTP2_ROOT_DIR="${{ env.VCPKG_ROOT }}/installed/${{ env.VCPKG_TRIPLET }}" ^
               -DWITH_ZLIB="ON" ^
-              -DZLIB_ROOT_DIR="${{ env.VCPKG_ROOT }}/installed/${{ env.VCPKG_TRIPLET }}" ^
               -DWITH_PCRE="ON" ^
-              -DPCRE_ROOT_DIR="${{ env.VCPKG_ROOT }}/installed/${{ env.VCPKG_TRIPLET }}" ^
+              rem Explicit paths might still be needed if toolchain doesn't find them perfectly
+              rem These paths assume standard vcpkg installation structure
+              -DOPENSSL_ROOT_DIR="%VCPKG_INSTALLATION_ROOT%/installed/${{ env.VCPKG_TRIPLET }}" ^
+              -DBROTLI_ROOT_DIR="%VCPKG_INSTALLATION_ROOT%/installed/${{ env.VCPKG_TRIPLET }}" ^
+              -DLIBXML2_ROOT_DIR="%VCPKG_INSTALLATION_ROOT%/installed/${{ env.VCPKG_TRIPLET }}" ^
+              -DNGHTTP2_ROOT_DIR="%VCPKG_INSTALLATION_ROOT%/installed/${{ env.VCPKG_TRIPLET }}" ^
+              -DZLIB_ROOT_DIR="%VCPKG_INSTALLATION_ROOT%/installed/${{ env.VCPKG_TRIPLET }}" ^
+              -DPCRE_ROOT_DIR="%VCPKG_INSTALLATION_ROOT%/installed/${{ env.VCPKG_TRIPLET }}" ^
               -DENABLE_DEFLATE="shared" ^
               -DENABLE_HEADERS="shared" ^
               -DENABLE_PROXY="shared" ^
@@ -201,30 +198,22 @@ jobs:
         run: |
           cmake --build . --config Release --target install
 
-      - name: Adjust httpd.conf for Portability (Ensure ServerRoot is relative)
+      - name: Adjust httpd.conf for Portability
         shell: pwsh
         run: |
           $confFile = "${{ env.INSTALL_DIR }}/conf/httpd.conf"
           if (Test-Path $confFile) {
             Write-Host "Checking/Updating ServerRoot in $confFile"
             $content = Get-Content $confFile -Raw
-            # The Relocatable layout should set ServerRoot to '.', but we double-check
-            # If it's an absolute path based on INSTALL_DIR, replace it with a relative path.
-            # Example: Replace 'Define SRVROOT "D:/a/repo/repo/apache-install"' with 'Define SRVROOT "." '
             $installDirEscaped = [regex]::Escape("${{ env.INSTALL_DIR }}".Replace('\', '/'))
-            $newContent = $content -replace ('(Define\s+SRVROOT\s+")' + $installDirEscaped + '"'), '$1."' # Use "." for current dir
-            # Also ensure ServerRoot directive itself uses the variable or is relative
+            $newContent = $content -replace ('(Define\s+SRVROOT\s+")' + $installDirEscaped + '"'), '$1."'
             $newContent = $newContent -replace ('^ServerRoot\s+".*"'), 'ServerRoot "${SRVROOT}"'
-
-            # Ensure paths like DocumentRoot, ErrorLog, etc., use SRVROOT
-            # This might require more specific replacements depending on the default httpd.conf
             $newContent = $newContent -replace ('DocumentRoot\s+"[^"]*/htdocs"'), 'DocumentRoot "${SRVROOT}/htdocs"'
             $newContent = $newContent -replace ('<Directory\s+"[^"]*/htdocs">'), '<Directory "${SRVROOT}/htdocs">'
             $newContent = $newContent -replace ('ScriptAlias\s+/cgi-bin/\s+"[^"]*/cgi-bin/"'), 'ScriptAlias /cgi-bin/ "${SRVROOT}/cgi-bin/"'
             $newContent = $newContent -replace ('<Directory\s+"[^"]*/cgi-bin">'), '<Directory "${SRVROOT}/cgi-bin">'
-            $newContent = $newContent -replace ('ErrorLog\s+"[^"]*/logs/error.log"'), 'ErrorLog "logs/error.log"' # Relative to ServerRoot
-            $newContent = $newContent -replace ('CustomLog\s+"[^"]*/logs/access.log"'), 'CustomLog "logs/access.log" common' # Relative to ServerRoot
-
+            $newContent = $newContent -replace ('ErrorLog\s+"[^"]*/logs/error.log"'), 'ErrorLog "logs/error.log"'
+            $newContent = $newContent -replace ('CustomLog\s+"[^"]*/logs/access.log"'), 'CustomLog "logs/access.log" common'
             $newContent | Set-Content -Path $confFile -Encoding UTF8 -NoNewline
             Write-Host "httpd.conf updated for relative paths."
           } else {
@@ -248,8 +237,7 @@ jobs:
           name: Apache httpd ${{ env.APACHE_VERSION }} (Windows x64 Portable)
           body: |
             Automated build of Apache httpd v${{ env.APACHE_VERSION }} for Windows x64 (Portable).
-            Compiled on ${{ runner.os }}.
-            vcpkg commit: `${{ env.VCPKG_COMMIT_ID }}`
+            Compiled on ${{ runner.os }} using the runner's pre-installed environment.
           files: ${{ env.PACKAGE_PATH }}
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # This token is automatically provided by GitHub
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
