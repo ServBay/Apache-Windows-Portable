@@ -17,25 +17,27 @@ jobs:
 
     steps:
     - name: Harden Runner
-      uses: step-security/harden-runner@v2.7.0 # v2.7.0
+      uses: step-security/harden-runner@v2.7.0 # Changed to version tag
       with:
         egress-policy: audit # TODO: change to 'egress-policy: block' after couple of runs
 
     - name: Check out code (optional, if you need repo files)
-      uses: actions/checkout@v4.1.1 # v4.1.1
+      uses: actions/checkout@v4.1.1 # Changed to version tag
 
     - name: Install vcpkg
-      uses: lukka/run-vcpkg@v11 # v11
+      uses: lukka/run-vcpkg@v11 # Changed to version tag
       with:
+        # Keep vcpkg outside the checkout directory to potentially avoid git issues
         vcpkgDirectory: '${{ runner.temporary }}/vcpkg'
-        vcpkgGitCommitId: '7d259227a1fb6471a0253dd5ab7419835228f7d7' # Use a specific commit for stability
+        # Removed vcpkgGitCommitId to use the default version bundled with the action version
 
     - name: Install Dependencies via vcpkg
       run: |
         $vcpkg_root = '${{ runner.temporary }}/vcpkg'
-        # Install dependencies for x64 Windows. Using dynamic linking for broader compatibility initially.
-        # Add other dependencies if needed based on specific modules
+        # Install dependencies for x64 Windows.
+        Write-Host "Attempting to install dependencies using vcpkg at $vcpkg_root"
         & "$vcpkg_root/vcpkg" install apr apr-util openssl pcre2 zlib libxml2 nghttp2 brotli --triplet x64-windows
+        Write-Host "Finished installing dependencies."
       shell: pwsh
 
     - name: Download Apache Source
@@ -44,8 +46,13 @@ jobs:
         $url = "https://archive.apache.org/dist/httpd/httpd-$apache_version.tar.gz"
         $output_file = "httpd-$apache_version.tar.gz"
         Write-Host "Downloading Apache $apache_version from $url"
-        Invoke-WebRequest -Uri $url -OutFile $output_file
-        # Extract the tar.gz archive
+        try {
+          Invoke-WebRequest -Uri $url -OutFile $output_file -UseBasicParsing
+        } catch {
+          Write-Error "Failed to download Apache source: $_"
+          exit 1
+        }
+        Write-Host "Extracting $output_file"
         tar -xzf $output_file
       shell: pwsh
 
@@ -58,6 +65,13 @@ jobs:
         $vcpkg_root = '${{ runner.temporary }}/vcpkg'
         $vcpkg_toolchain = "$vcpkg_root/scripts/buildsystems/vcpkg.cmake"
 
+        # Ensure source directory exists
+        if (-not (Test-Path $source_dir)) {
+          Write-Error "Apache source directory not found: $source_dir"
+          exit 1
+        }
+
+        Write-Host "Configuring Apache build..."
         cmake -S "$source_dir" -B "$build_dir" `
           -DCMAKE_TOOLCHAIN_FILE="$vcpkg_toolchain" `
           -DCMAKE_INSTALL_PREFIX="$install_dir" `
@@ -67,7 +81,6 @@ jobs:
           -DENABLE_MODS_SHARED=all `     # Build most modules as shared
           -DENABLE_MPMS_SHARED=all `     # Build MPMs as shared (winnt is typical)
           # --- Enable specific modules based on your needs ---
-          # Core features often enabled by default or via other flags
           -DENABLE_DEFLATE=ON `
           -DENABLE_HEADERS=ON `
           -DENABLE_INCLUDE=ON `
@@ -120,11 +133,13 @@ jobs:
 
     - name: Build Apache
       run: |
+        Write-Host "Building Apache..."
         cmake --build "${{ github.workspace }}/build" --config Release --parallel
       shell: pwsh
 
     - name: Install Apache
       run: |
+        Write-Host "Installing Apache to $install_dir"
         cmake --install "${{ github.workspace }}/build" --config Release
       shell: pwsh
 
@@ -139,13 +154,13 @@ jobs:
           (Get-Content $conf_file -Raw) -replace 'Define SRVROOT ".*?"', 'Define SRVROOT "."' `
                                        -replace 'ServerRoot ".*?"', 'ServerRoot "${SRVROOT}"' `
                                        -replace 'DocumentRoot ".*?"', 'DocumentRoot "${SRVROOT}/htdocs"' `
-                                       -replace '(<Directory ")C:/.*?/htdocs(">)', '$1${SRVROOT}/htdocs$2' `
-                                       -replace 'ScriptAlias /cgi-bin/ ".*?"', 'ScriptAlias /cgi-bin/ "${SRVROOT}/cgi-bin/"' `
-                                       -replace '(<Directory ")C:/.*?/cgi-bin(">)', '$1${SRVROOT}/cgi-bin$2' `
-                                       -replace 'ErrorLog ".*?"', 'ErrorLog "logs/error.log"' `
-                                       -replace 'CustomLog ".*?" common', 'CustomLog "logs/access.log" common' `
-                                       -replace 'PidFile ".*?"', 'PidFile "logs/httpd.pid"' `
-                                       -replace 'LoadModule (.*?) ".*?/mod_$1.so"', 'LoadModule $1 "modules/mod_$1.so"' | Set-Content $conf_file -Encoding UTF8
+                                       -replace '(<Directory\s+")C:[\\/].*?/htdocs(">)', '$1${SRVROOT}/htdocs$2' ` # More robust regex for path
+                                       -replace 'ScriptAlias\s+/cgi-bin/\s+".*?"', 'ScriptAlias /cgi-bin/ "${SRVROOT}/cgi-bin/"' `
+                                       -replace '(<Directory\s+")C:[\\/].*?/cgi-bin(">)', '$1${SRVROOT}/cgi-bin$2' ` # More robust regex for path
+                                       -replace 'ErrorLog\s+".*?"', 'ErrorLog "logs/error.log"' `
+                                       -replace 'CustomLog\s+".*?"\s+common', 'CustomLog "logs/access.log" common' `
+                                       -replace 'PidFile\s+".*?"', 'PidFile "logs/httpd.pid"' `
+                                       -replace 'LoadModule\s+(\S+)\s+".*?[/\\]mod_\1\.so"', 'LoadModule $1 modules/mod_$1.so' | Set-Content $conf_file -Encoding UTF8 # More robust regex for LoadModule
           Write-Host "Paths adjusted."
         } else {
           Write-Warning "$conf_file not found. Skipping path adjustments."
@@ -156,22 +171,22 @@ jobs:
       run: |
         $apache_version = "${{ inputs.apache_version }}"
         $install_dir = "${{ github.workspace }}/apache-install"
-        $zip_filename = "apache-${apache_version}-win-x64.zip"
+        $zip_filename = "apache-${apache_version}-win64-portable.zip"
+        Write-Host "Creating archive $zip_filename from $install_dir"
         Compress-Archive -Path "$install_dir/*" -DestinationPath "${{ github.workspace }}/$zip_filename" -Force
         Write-Host "Created $zip_filename"
       shell: pwsh
 
     - name: Create GitHub Release and Upload Asset
-      uses: softprops/action-gh-release@v2
+      uses: softprops/action-gh-release@v2.0.6 # Changed to version tag
       with:
         tag_name: "v${{ inputs.apache_version }}"
         name: "Apache HTTP Server ${{ inputs.apache_version }} (Windows x64 Portable)"
         body: |
           Portable build of Apache HTTP Server ${{ inputs.apache_version }} for Windows x64.
-          Compiled with MSVC via GitHub Actions.
+          Compiled with MSVC via GitHub Actions using vcpkg for dependencies.
           Includes common modules as shared libraries.
         files: |
           ${{ github.workspace }}/apache-*.zip
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
