@@ -121,14 +121,14 @@ jobs:
         shell: cmd
         working-directory: ${{ env.SOURCE_DIR }}/httpd-${{ env.APACHE_VERSION }}
         run: |
+          if exist build rmdir /s /q build
           mkdir build
-          cd build
 
           rem Use the known runner vcpkg root for the toolchain file
           set VCPKG_TOOLCHAIN_FILE=${{ env.RUNNER_VCPKG_ROOT }}\scripts\buildsystems\vcpkg.cmake
           echo "Using CMake Toolchain: %VCPKG_TOOLCHAIN_FILE%"
 
-          cmake .. ^
+          cmake --build build ^
               -G "Visual Studio 17 2022" -A x64 ^
               -DCMAKE_INSTALL_PREFIX="${{ env.INSTALL_DIR }}" ^
               -DCMAKE_TOOLCHAIN_FILE="%VCPKG_TOOLCHAIN_FILE%" ^
@@ -187,15 +187,15 @@ jobs:
 
       - name: Build Apache
         shell: cmd
-        working-directory: ${{ env.SOURCE_DIR }}/httpd-${{ env.APACHE_VERSION }}/build
+        working-directory: ${{ env.SOURCE_DIR }}/httpd-${{ env.APACHE_VERSION }}
         run: |
-          cmake --build . --config Release --parallel
+          cmake --build build --config Release --parallel
 
       - name: Install Apache
         shell: cmd
-        working-directory: ${{ env.SOURCE_DIR }}/httpd-${{ env.APACHE_VERSION }}/build
+        working-directory: ${{ env.SOURCE_DIR }}/httpd-${{ env.APACHE_VERSION }}
         run: |
-          cmake --build . --config Release --target install
+          cmake --build build --config Release --target install
 
       - name: Adjust httpd.conf for Portability
         shell: pwsh
