@@ -77,7 +77,7 @@ jobs:
         run: |
           echo "Using vcpkg from ${{ env.RUNNER_VCPKG_ROOT }}"
           rem Explicitly specify the vcpkg root to avoid warnings and ensure correctness
-          "${{ env.RUNNER_VCPKG_ROOT }}\vcpkg" install openssl pcre2 zlib brotli libxml2 nghttp2 --triplet ${{ env.VCPKG_TRIPLET }} --clean-after-build --vcpkg-root "${{ env.RUNNER_VCPKG_ROOT }}"
+          "${{ env.RUNNER_VCPKG_ROOT }}\vcpkg" install openssl pcre2 zlib brotli libxml2 nghttp2 curl --triplet ${{ env.VCPKG_TRIPLET }} --clean-after-build --vcpkg-root "${{ env.RUNNER_VCPKG_ROOT }}"
         shell: cmd
       # --- End vcpkg ---
 
@@ -147,14 +147,13 @@ jobs:
               -DENABLE_NGHTTP2="ON" ^
               -DWITH_ZLIB="ON" ^
               -DWITH_PCRE="ON" ^
-              rem Explicit paths might still be needed if toolchain doesn't find them perfectly
-              rem These paths assume standard vcpkg installation structure
               -DOPENSSL_ROOT_DIR="${{ env.RUNNER_VCPKG_ROOT }}/installed/${{ env.VCPKG_TRIPLET }}" ^
               -DBROTLI_ROOT_DIR="${{ env.RUNNER_VCPKG_ROOT }}/installed/${{ env.VCPKG_TRIPLET }}" ^
               -DLIBXML2_ROOT_DIR="${{ env.RUNNER_VCPKG_ROOT }}/installed/${{ env.VCPKG_TRIPLET }}" ^
               -DNGHTTP2_ROOT_DIR="${{ env.RUNNER_VCPKG_ROOT }}/installed/${{ env.VCPKG_TRIPLET }}" ^
               -DZLIB_ROOT_DIR="${{ env.RUNNER_VCPKG_ROOT }}/installed/${{ env.VCPKG_TRIPLET }}" ^
               -DPCRE_ROOT_DIR="${{ env.RUNNER_VCPKG_ROOT }}/installed/${{ env.VCPKG_TRIPLET }}" ^
+              -DCURL_ROOT_DIR="${{ env.RUNNER_VCPKG_ROOT }}/installed/${{ env.VCPKG_TRIPLET }}" ^
               -DENABLE_DEFLATE="shared" ^
               -DENABLE_HEADERS="shared" ^
               -DENABLE_PROXY="shared" ^
