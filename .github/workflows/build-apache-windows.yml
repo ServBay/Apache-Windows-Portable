@@ -81,7 +81,34 @@ jobs:
           $archiveName = $url.Split('/')[-1]
           $extractPath = Join-Path $baseSrcPath $pkgName
 
-          Get-AndExtract -url $url -archiveName $archiveName -extractDir $extractPath
+          $tempExtractPath = Join-Path $baseSrcPath "$($pkgName)-temp-extract"
+          Get-AndExtract -url $url -archiveName $archiveName -extractDir $tempExtractPath
+          # Find the actual extracted folder
+          $extractedFolder = Get-ChildItem -Path $tempExtractPath -Directory | Select-Object -First 1
+           if ($extractedFolder) {
+              # If the extracted folder name matches the pkgName, move its *contents*
+              if ($extractedFolder.Name -eq $pkgName) {
+                  echo "Moving contents of $($extractedFolder.FullName) to $extractPath"
+                  Move-Item -Path (Join-Path $extractedFolder.FullName "*") -Destination $extractPath -Force
+                  Remove-Item $extractedFolder.FullName -Recurse -Force
+              } else {
+                  # Otherwise, rename the folder
+                  echo "Renaming $($extractedFolder.FullName) to $extractPath"
+                  Move-Item -Path $extractedFolder.FullName -Destination $extractPath
+              }
+              Remove-Item $tempExtractPath -Recurse -Force
+          } else {
+               # Handle cases where extraction doesn't create a top-level directory (less common for tar.gz)
+               # Check if files were extracted directly into tempExtractPath
+               if ((Get-ChildItem -Path $tempExtractPath).Count -gt 0) {
+                  echo "Moving contents of $tempExtractPath to $extractPath"
+                  Move-Item -Path (Join-Path $tempExtractPath "*") -Destination $extractPath -Force
+                  Remove-Item $tempExtractPath -Recurse -Force
+               } else {
+                  echo "ERROR: Could not find extracted folder or files for $pkgName in $tempExtractPath"
+                  exit 1
+               }
+          }
 
           # Verify extraction by checking if the directory exists
           if (-not (Test-Path $extractPath)) {
