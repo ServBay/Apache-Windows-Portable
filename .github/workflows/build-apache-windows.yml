@@ -66,13 +66,13 @@ jobs:
           "jansson-2.14.1"      = "https://github.com/akheron/jansson/releases/download/v2.14.1/jansson-2.14.1.tar.gz"
           "brotli-1.1.0"        = "https://github.com/google/brotli/archive/refs/tags/v1.1.0.tar.gz"
           "lua-5.4.7"           = "https://www.lua.org/ftp/lua-5.4.7.tar.gz"
-          "apr-1.7.5"           = "https://dlcdn.apache.org//apr/apr-1.7.5.tar.gz"
-          "apr-iconv-1.2.2"     = "https://dlcdn.apache.org//apr/apr-iconv-1.2.2.tar.gz"
-          "apr-util-1.6.3"      = "https://dlcdn.apache.org//apr/apr-util-1.6.3.tar.gz"
+          "apr-1.7.5"           = "https://dlcdn.apache.org/apr/apr-1.7.5.tar.gz"
+          "apr-iconv-1.2.2"     = "https://dlcdn.apache.org/apr/apr-iconv-1.2.2.tar.gz"
+          "apr-util-1.6.3"      = "https://dlcdn.apache.org/apr/apr-util-1.6.3.tar.gz"
           "nghttp2-1.65.0"      = "https://github.com/nghttp2/nghttp2/releases/download/v1.65.0/nghttp2-1.65.0.tar.gz"
           "curl-8.13.0"         = "https://curl.se/download/curl-8.13.0.tar.gz"
-          "httpd-2.4.63"        = "https://dlcdn.apache.org//httpd/httpd-2.4.63.tar.gz"
-          "mod_fcgid-2.3.9"     = "https://dlcdn.apache.org//httpd/mod_fcgid/mod_fcgid-2.3.9.tar.gz"
+          "httpd-2.4.63"        = "https://dlcdn.apache.org/httpd/httpd-2.4.63.tar.gz"
+          "mod_fcgid-2.3.9"     = "https://dlcdn.apache.org/httpd/mod_fcgid/mod_fcgid-2.3.9.tar.gz"
         }
 
         # Download and extract each package
@@ -81,22 +81,7 @@ jobs:
           $archiveName = $url.Split('/')[-1]
           $extractPath = Join-Path $baseSrcPath $pkgName
 
-          # Special handling for Brotli directory name
-          if ($pkgName -eq "brotli-1.1.0") {
-            $tempExtractPath = Join-Path $baseSrcPath "brotli-temp"
-            Get-AndExtract -url $url -archiveName $archiveName -extractDir $tempExtractPath
-            # The extracted folder might be named 'brotli-1.1.0' or 'brotli-v1.1.0' etc. Find it and rename.
-            $extractedFolder = Get-ChildItem -Path $tempExtractPath | Select-Object -First 1
-            if ($extractedFolder) {
-                Rename-Item -Path $extractedFolder.FullName -NewName $extractPath
-                Remove-Item $tempExtractPath
-            } else {
-                echo "ERROR: Could not find extracted folder for Brotli in $tempExtractPath"
-                exit 1
-            }
-          } else {
-            Get-AndExtract -url $url -archiveName $archiveName -extractDir $extractPath
-          }
+          Get-AndExtract -url $url -archiveName $archiveName -extractDir $extractPath
 
           # Verify extraction by checking if the directory exists
           if (-not (Test-Path $extractPath)) {
