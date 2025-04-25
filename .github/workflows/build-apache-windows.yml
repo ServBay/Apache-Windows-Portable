@@ -1,243 +1,129 @@
-name: Build Apache Portable (Windows x64 - Using Runner Env)
+name: Build Apache on Windows
 
 on:
-  workflow_dispatch:
-    inputs:
-      apache_version:
-        description: 'Apache httpd version to build (e.g., 2.4.59)'
-        required: true
-        type: string
-
-env:
-  # Apache 版本和源码 URL
-  APACHE_VERSION: ${{ github.event.inputs.apache_version }}
-  APACHE_MAJOR_VERSION: # Will be extracted later
-  APR_VERSION: 1.7.5 # Adjust if needed for the target Apache version
-  APR_UTIL_VERSION: 1.6.3 # Adjust if needed for the target Apache version
-  APACHE_MIRROR: https://dlcdn.apache.org/httpd
-  APR_MIRROR: https://dlcdn.apache.org/apr
-
-  # 构建目录和安装目录
-  SOURCE_DIR: ${{ github.workspace }}\source # Directory to store downloaded sources
-  INSTALL_DIR: ${{ github.workspace }}\apache-install # Temporary install dir before packaging
-  # Use the vcpkg triplet provided by the runner environment
-  VCPKG_TRIPLET: x64-windows
-  # VCPKG_INSTALLATION_ROOT is usually set by the runner, e.g., C:\vcpkg
-  RUNNER_VCPKG_ROOT: C:\vcpkg
+#   push:
+#     branches: [ main ] # Trigger on push to main branch
+  workflow_dispatch: # Allow manual trigger
 
 jobs:
   build:
-    runs-on: windows-latest
+    runs-on: windows-latest # Use the latest Windows runner
+
     steps:
-      - name: Checkout workflow code
-        uses: actions/checkout@v4
+    - name: Checkout repository
+      uses: actions/checkout@v4 # Checks out your repository code
 
-      - name: Extract Major Apache Version
-        id: get_major_version
-        run: |
-          $version = "${{ env.APACHE_VERSION }}"
-          $majorVersion = ($version -split '\.')[0..1] -join '.'
-          echo "APACHE_MAJOR_VERSION=$majorVersion" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          echo "Major version: $majorVersion"
-        shell: pwsh
+    - name: Install Prerequisites
+      run: |
+        choco install cmake --installargs 'ADD_CMAKE_TO_PATH=System' -y
+        choco install strawberryperl -y
+        choco install nasm -y
+        choco install 7zip.install -y
+      shell: powershell
 
-      - name: Setup MSVC developer environment
-        uses: ilammy/msvc-dev-cmd@v1
-        # This action sets up the necessary compiler paths
+    - name: Add 7zip to PATH # Ensure 7z is available in subsequent steps
+      run: |
+        echo "C:\Program Files\7-Zip" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      shell: powershell
 
-      # --- Use Pre-installed vcpkg ---
-      - name: Verify vcpkg Environment
-        run: |
-          echo "Runner's expected vcpkg root: ${{ env.RUNNER_VCPKG_ROOT }}"
-          if not exist "${{ env.RUNNER_VCPKG_ROOT }}\vcpkg.exe" (
-            echo "Error: vcpkg.exe not found at ${{ env.RUNNER_VCPKG_ROOT }}"
-            exit /b 1
-          )
-          echo "Attempting to run vcpkg from ${{ env.RUNNER_VCPKG_ROOT }}"
-          "${{ env.RUNNER_VCPKG_ROOT }}\vcpkg" version
-        shell: cmd
+    - name: Create Source Directory
+      run: mkdir src
+      shell: cmd # Use cmd for simple directory creation
 
-      # Optional: Cache vcpkg artifacts based on runner's vcpkg root
-      # Note: The key doesn't track the exact vcpkg version, but caches based on OS and workflow files
-      - name: Cache vcpkg packages
-        uses: actions/cache@v4
-        with:
-          path: |
-            ${{ env.RUNNER_VCPKG_ROOT }}
-          key: ${{ runner.os }}-vcpkg-cache
-        #   key: ${{ runner.os }}-vcpkg-cache-${{ hashFiles('.github/workflows/*.yml') }}
-          restore-keys: |
-            ${{ runner.os }}-vcpkg-cache
-
-      - name: Install Dependencies via pre-installed vcpkg
-        run: |
-          echo "Using vcpkg from ${{ env.RUNNER_VCPKG_ROOT }}"
-          rem Explicitly specify the vcpkg root to avoid warnings and ensure correctness
-          "${{ env.RUNNER_VCPKG_ROOT }}\vcpkg" install openssl pcre2 zlib brotli libxml2 nghttp2 curl apr apr-util --triplet ${{ env.VCPKG_TRIPLET }} --clean-after-build --vcpkg-root "${{ env.RUNNER_VCPKG_ROOT }}"
-        shell: cmd
-      # --- End vcpkg ---
-
-      - name: Install Strawberry Perl
-        run: choco install strawberryperl --yes --no-progress
-        shell: cmd
-
-      - name: Create Source Directory
-        run: mkdir ${{ env.SOURCE_DIR }}
-        shell: cmd
-
-      - name: Download Apache httpd source
-        shell: pwsh
-        working-directory: ${{ env.SOURCE_DIR }}
-        run: |
-          $url = "${{ env.APACHE_MIRROR }}/httpd-${{ env.APACHE_VERSION }}.tar.gz"
-          Write-Host "Downloading Apache from $url"
-          Invoke-WebRequest -Uri $url -OutFile httpd.tar.gz
-          tar -xzf httpd.tar.gz
-          if (-not (Test-Path "httpd-${{ env.APACHE_VERSION }}")) { Write-Error "Failed to extract Apache source"; exit 1 }
-
-    #   - name: Download APR source
-    #     shell: pwsh
-    #     working-directory: ${{ env.SOURCE_DIR }}
-    #     run: |
-    #       $url = "${{ env.APR_MIRROR }}/apr-${{ env.APR_VERSION }}.tar.gz"
-    #       Write-Host "Downloading APR from $url"
-    #       Invoke-WebRequest -Uri $url -OutFile apr.tar.gz
-    #       tar -xzf apr.tar.gz
-    #       Move-Item -Path "apr-${{ env.APR_VERSION }}" -Destination "httpd-${{ env.APACHE_VERSION }}/srclib/apr" -Force
-    #       if (-not (Test-Path "httpd-${{ env.APACHE_VERSION }}/srclib/apr/include")) { Write-Error "Failed to move APR source"; exit 1 }
-
-    #   - name: Download APR-Util source
-    #     shell: pwsh
-    #     working-directory: ${{ env.SOURCE_DIR }}
-    #     run: |
-    #       $url = "${{ env.APR_MIRROR }}/apr-util-${{ env.APR_UTIL_VERSION }}.tar.gz"
-    #       Write-Host "Downloading APR-Util from $url"
-    #       Invoke-WebRequest -Uri $url -OutFile apr-util.tar.gz
-    #       tar -xzf apr-util.tar.gz
-    #       Move-Item -Path "apr-util-${{ env.APR_UTIL_VERSION }}" -Destination "httpd-${{ env.APACHE_VERSION }}/srclib/apr-util" -Force
-    #       if (-not (Test-Path "httpd-${{ env.APACHE_VERSION }}/srclib/apr-util/include")) { Write-Error "Failed to move APR-Util source"; exit 1 }
-
-      - name: Configure Apache with CMake
-        shell: cmd
-        working-directory: ${{ env.SOURCE_DIR }}/httpd-${{ env.APACHE_VERSION }}
-        run: |
-          if exist build rmdir /s /q build
-          mkdir build
-          cd build
-
-          rem Use the known runner vcpkg root for the toolchain file
-          set VCPKG_TOOLCHAIN_FILE=${{ env.RUNNER_VCPKG_ROOT }}\scripts\buildsystems\vcpkg.cmake
-          echo "Using CMake Toolchain: %VCPKG_TOOLCHAIN_FILE%"
-
-          cmake .. ^
-              -G "Visual Studio 17 2022" -A x64 ^
-              -DCMAKE_INSTALL_PREFIX="${{ env.INSTALL_DIR }}" ^
-              -DCMAKE_TOOLCHAIN_FILE="%VCPKG_TOOLCHAIN_FILE%" ^
-              -DVCPKG_TARGET_TRIPLET="${{ env.VCPKG_TRIPLET }}" ^
-              -DINSTALL_LAYOUT="Relocatable" ^
-              -DENABLE_MODULES="shared" ^
-              -DENABLE_MPMS="winnt" ^
-              -DENABLE_SSL="ON" ^
-              -DENABLE_HTTP2="ON" ^
-              -DENABLE_BROTLI="ON" ^
-              -DENABLE_XML="ON" ^
-              -DENABLE_NGHTTP2="ON" ^
-              -DWITH_ZLIB="ON" ^
-              -DWITH_PCRE="ON" ^
-              -DOPENSSL_ROOT_DIR="${{ env.RUNNER_VCPKG_ROOT }}/installed/${{ env.VCPKG_TRIPLET }}" ^
-              -DBROTLI_ROOT_DIR="${{ env.RUNNER_VCPKG_ROOT }}/installed/${{ env.VCPKG_TRIPLET }}" ^
-              -DLIBXML2_ROOT_DIR="${{ env.RUNNER_VCPKG_ROOT }}/installed/${{ env.VCPKG_TRIPLET }}" ^
-              -DNGHTTP2_ROOT_DIR="${{ env.RUNNER_VCPKG_ROOT }}/installed/${{ env.VCPKG_TRIPLET }}" ^
-              -DZLIB_ROOT_DIR="${{ env.RUNNER_VCPKG_ROOT }}/installed/${{ env.VCPKG_TRIPLET }}" ^
-              -DPCRE_ROOT_DIR="${{ env.RUNNER_VCPKG_ROOT }}/installed/${{ env.VCPKG_TRIPLET }}" ^
-              -DCURL_ROOT_DIR="${{ env.RUNNER_VCPKG_ROOT }}/installed/${{ env.VCPKG_TRIPLET }}" ^
-              -DENABLE_DEFLATE="shared" ^
-              -DENABLE_HEADERS="shared" ^
-              -DENABLE_PROXY="shared" ^
-              -DENABLE_PROXY_CONNECT="shared" ^
-              -DENABLE_PROXY_FTP="shared" ^
-              -DENABLE_PROXY_HTTP="shared" ^
-              -DENABLE_PROXY_FCGI="shared" ^
-              -DENABLE_PROXY_SCGI="shared" ^
-              -DENABLE_PROXY_WSTUNNEL="shared" ^
-              -DENABLE_PROXY_AJP="shared" ^
-              -DENABLE_PROXY_BALANCER="shared" ^
-              -DENABLE_PROXY_EXPRESS="shared" ^
-              -DENABLE_PROXY_HCHECK="shared" ^
-              -DENABLE_PROXY_HTTP2="shared" ^
-              -DENABLE_REWRITE="shared" ^
-              -DENABLE_CACHE="shared" ^
-              -DENABLE_CACHE_DISK="shared" ^
-              -DENABLE_CACHE_SOCACHE="shared" ^
-              -DENABLE_SOCACHE_SHMCB="shared" ^
-              -DENABLE_SOCACHE_DBM="shared" ^
-              -DENABLE_SOCACHE_MEMCACHE="OFF" ^
-              -DENABLE_SESSION="shared" ^
-              -DENABLE_SESSION_COOKIE="shared" ^
-              -DENABLE_SESSION_CRYPTO="shared" ^
-              -DENABLE_SESSION_DBM="shared" ^
-              -DENABLE_AUTHNZ_FCGI="shared" ^
-              -DENABLE_DAV="shared" ^
-              -DENABLE_DAV_FS="shared" ^
-              -DENABLE_DAV_LOCK="shared" ^
-              -DENABLE_VHOST_ALIAS="shared" ^
-              -DENABLE_INCLUDE="shared" ^
-              -DENABLE_REQUEST="shared" ^
-              -DENABLE_REMOTEIP="shared" ^
-              -DENABLE_LUA="OFF"
-
-      - name: Build Apache
-        shell: cmd
-        working-directory: ${{ env.SOURCE_DIR }}/httpd-${{ env.APACHE_VERSION }}/build
-        run: |
-          cmake --build . --config Release --parallel
-
-      - name: Install Apache
-        shell: cmd
-        working-directory: ${{ env.SOURCE_DIR }}/httpd-${{ env.APACHE_VERSION }}/build
-        run: |
-          cmake --build . --config Release --target install
-
-      - name: Adjust httpd.conf for Portability
-        shell: pwsh
-        run: |
-          $confFile = "${{ env.INSTALL_DIR }}/conf/httpd.conf"
-          if (Test-Path $confFile) {
-            Write-Host "Checking/Updating ServerRoot in $confFile"
-            $content = Get-Content $confFile -Raw
-            $installDirEscaped = [regex]::Escape("${{ env.INSTALL_DIR }}".Replace('\', '/'))
-            $newContent = $content -replace ('(Define\s+SRVROOT\s+")' + $installDirEscaped + '"'), '$1."'
-            $newContent = $newContent -replace ('^ServerRoot\s+".*"'), 'ServerRoot "${SRVROOT}"'
-            $newContent = $newContent -replace ('DocumentRoot\s+"[^"]*/htdocs"'), 'DocumentRoot "${SRVROOT}/htdocs"'
-            $newContent = $newContent -replace ('<Directory\s+"[^"]*/htdocs">'), '<Directory "${SRVROOT}/htdocs">'
-            $newContent = $newContent -replace ('ScriptAlias\s+/cgi-bin/\s+"[^"]*/cgi-bin/"'), 'ScriptAlias /cgi-bin/ "${SRVROOT}/cgi-bin/"'
-            $newContent = $newContent -replace ('<Directory\s+"[^"]*/cgi-bin">'), '<Directory "${SRVROOT}/cgi-bin">'
-            $newContent = $newContent -replace ('ErrorLog\s+"[^"]*/logs/error.log"'), 'ErrorLog "logs/error.log"'
-            $newContent = $newContent -replace ('CustomLog\s+"[^"]*/logs/access.log"'), 'CustomLog "logs/access.log" common'
-            $newContent | Set-Content -Path $confFile -Encoding UTF8 -NoNewline
-            Write-Host "httpd.conf updated for relative paths."
+    - name: Download and Extract Dependencies
+      shell: powershell # Use PowerShell for better scripting capabilities
+      run: |
+        # Helper function for downloading and extracting
+        function Get-AndExtract($url, $archiveName, $extractDir) {
+          $downloadPath = Join-Path $env:RUNNER_TEMP $archiveName
+          echo "Downloading $url to $downloadPath"
+          Invoke-WebRequest -Uri $url -OutFile $downloadPath
+          echo "Extracting $downloadPath to $extractDir"
+          # Handle .tar.gz and .tar.xz (common formats)
+          if ($archiveName -like '*.tar.gz' -or $archiveName -like '*.tar.xz') {
+            # Extract the tar from the archive first, then extract the contents
+            7z x $downloadPath -so | 7z x -aoa -si -ttar -o"$extractDir"
+          } elseif ($archiveName -like '*.zip') {
+             7z x $downloadPath -aoa -o"$extractDir"
           } else {
-            Write-Warning "$confFile not found after install step."
+             echo "ERROR: Unsupported archive type for $archiveName"
+             exit 1
+          }
+          # Remove the archive after extraction
+          Remove-Item $downloadPath
+        }
+
+        $baseSrcPath = Join-Path $env:GITHUB_WORKSPACE "src"
+
+        # Define packages and URLs
+        $packages = @{
+          "zlib-1.3.1"          = "https://zlib.net/zlib-1.3.1.tar.gz"
+          "pcre2-10.45"         = "https://github.com/PCRE2Project/pcre2/releases/download/pcre2-10.45/pcre2-10.45.tar.gz"
+          "expat-2.7.1"         = "https://github.com/libexpat/libexpat/releases/download/R_2_7_1/expat-2.7.1.tar.gz"
+          "openssl-3.3.3"       = "https://www.openssl.org/source/openssl-3.3.3.tar.gz"
+          # "openssl-1.1.1w"      = "https://www.openssl.org/source/openssl-1.1.1w.tar.gz"
+          "libxml2-2.14.1"      = "https://download.gnome.org/sources/libxml2/2.14/libxml2-2.14.1.tar.xz"
+          "jansson-2.14.1"      = "https://github.com/akheron/jansson/releases/download/v2.14.1/jansson-2.14.1.tar.gz"
+          "brotli-1.1.0"        = "https://github.com/google/brotli/archive/refs/tags/v1.1.0.tar.gz"
+          "lua-5.4.7"           = "https://www.lua.org/ftp/lua-5.4.7.tar.gz"
+          "apr-1.7.5"           = "https://dlcdn.apache.org//apr/apr-1.7.5.tar.gz"
+          "apr-iconv-1.2.2"     = "https://dlcdn.apache.org//apr/apr-iconv-1.2.2.tar.gz"
+          "apr-util-1.6.3"      = "https://dlcdn.apache.org//apr/apr-util-1.6.3.tar.gz"
+          "nghttp2-1.65.0"      = "https://github.com/nghttp2/nghttp2/releases/download/v1.65.0/nghttp2-1.65.0.tar.gz"
+          "curl-8.13.0"         = "https://curl.se/download/curl-8.13.0.tar.gz"
+          "httpd-2.4.63"        = "https://dlcdn.apache.org//httpd/httpd-2.4.63.tar.gz"
+          "mod_fcgid-2.3.9"     = "https://dlcdn.apache.org//httpd/mod_fcgid/mod_fcgid-2.3.9.tar.gz"
+        }
+
+        # Download and extract each package
+        foreach ($pkgName in $packages.Keys) {
+          $url = $packages[$pkgName]
+          $archiveName = $url.Split('/')[-1]
+          $extractPath = Join-Path $baseSrcPath $pkgName
+
+          # Special handling for Brotli directory name
+          if ($pkgName -eq "brotli-1.1.0") {
+            $tempExtractPath = Join-Path $baseSrcPath "brotli-temp"
+            Get-AndExtract -url $url -archiveName $archiveName -extractDir $tempExtractPath
+            # The extracted folder might be named 'brotli-1.1.0' or 'brotli-v1.1.0' etc. Find it and rename.
+            $extractedFolder = Get-ChildItem -Path $tempExtractPath | Select-Object -First 1
+            if ($extractedFolder) {
+                Rename-Item -Path $extractedFolder.FullName -NewName $extractPath
+                Remove-Item $tempExtractPath
+            } else {
+                echo "ERROR: Could not find extracted folder for Brotli in $tempExtractPath"
+                exit 1
+            }
+          } else {
+            Get-AndExtract -url $url -archiveName $archiveName -extractDir $extractPath
           }
 
-      - name: Create ZIP Package
-        shell: pwsh
-        run: |
-          $packageName = "apache-${{ env.APACHE_VERSION }}-win-x64.zip"
-          $packagePath = "${{ github.workspace }}/$packageName"
-          Compress-Archive -Path "${{ env.INSTALL_DIR }}\*" -DestinationPath $packagePath -Force
-          echo "PACKAGE_NAME=$packageName" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          echo "PACKAGE_PATH=$packagePath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          # Verify extraction by checking if the directory exists
+          if (-not (Test-Path $extractPath)) {
+            echo "ERROR: Extraction failed or directory $extractPath not found for $pkgName"
+            exit 1
+          } else {
+             echo "Successfully extracted $pkgName to $extractPath"
+          }
+        }
 
-      - name: Create GitHub Release
-        id: create_release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: apache-${{ env.APACHE_VERSION }}-win-x64
-          name: Apache httpd ${{ env.APACHE_VERSION }} (Windows x64 Portable)
-          body: |
-            Automated build of Apache httpd v${{ env.APACHE_VERSION }} for Windows x64 (Portable).
-            Compiled on ${{ runner.os }} using the runner's pre-installed environment.
-          files: ${{ env.PACKAGE_PATH }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    - name: Set up MSBuild and VS Environment
+      uses: microsoft/setup-msbuild@v1.3 # Sets up MSBuild and VS dev environment
+
+    - name: Run Build Script
+      env:
+        # Set environment variables for the modified build script
+        BUILD_BASE_ENV: ${{ github.workspace }}\build
+        PREFIX_ENV: C:\ServBay\packages\apache
+        # VCVARSALL should be implicitly set by setup-msbuild, but double-check if issues arise
+      run: |
+        echo "Starting build_all.bat..."
+        call build_all.bat
+      shell: cmd # Use cmd to run the batch script
+
+    - name: Upload Build Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: apache-windows-build # Name of the artifact zip file
+        path: C:\ServBay\packages\apache # Path to the directory to upload
+        if-no-files-found: error # Fail the step if the directory is empty or not found
