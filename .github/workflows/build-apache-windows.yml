@@ -123,12 +123,13 @@ jobs:
         run: |
           if exist build rmdir /s /q build
           mkdir build
+          cd build
 
           rem Use the known runner vcpkg root for the toolchain file
           set VCPKG_TOOLCHAIN_FILE=${{ env.RUNNER_VCPKG_ROOT }}\scripts\buildsystems\vcpkg.cmake
           echo "Using CMake Toolchain: %VCPKG_TOOLCHAIN_FILE%"
 
-          cmake . --build build ^
+          cmake .. ^
               -G "Visual Studio 17 2022" -A x64 ^
               -DCMAKE_INSTALL_PREFIX="${{ env.INSTALL_DIR }}" ^
               -DCMAKE_TOOLCHAIN_FILE="%VCPKG_TOOLCHAIN_FILE%" ^
