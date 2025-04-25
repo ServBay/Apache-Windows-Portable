@@ -63,11 +63,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
-            ${{ env.RUNNER_VCPKG_ROOT }}/installed/
-            ${{ env.RUNNER_VCPKG_ROOT }}/packages/
-            ${{ env.RUNNER_VCPKG_ROOT }}/buildtrees/
-            ${{ env.RUNNER_VCPKG_ROOT }}/downloads/
-            !${{ env.RUNNER_VCPKG_ROOT }}/downloads/*.tmp
+            ${{ env.RUNNER_VCPKG_ROOT }}
           key: ${{ runner.os }}-vcpkg-cache
         #   key: ${{ runner.os }}-vcpkg-cache-${{ hashFiles('.github/workflows/*.yml') }}
           restore-keys: |
