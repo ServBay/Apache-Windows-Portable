@@ -18,8 +18,8 @@ env:
   APR_MIRROR: https://dlcdn.apache.org/apr
 
   # 构建目录和安装目录
-  SOURCE_DIR: ${{ github.workspace }}/source # Directory to store downloaded sources
-  INSTALL_DIR: ${{ github.workspace }}/apache-install # Temporary install dir before packaging
+  SOURCE_DIR: ${{ github.workspace }}\source # Directory to store downloaded sources
+  INSTALL_DIR: ${{ github.workspace }}\apache-install # Temporary install dir before packaging
   # Use the vcpkg triplet provided by the runner environment
   VCPKG_TRIPLET: x64-windows
   # VCPKG_INSTALLATION_ROOT is usually set by the runner, e.g., C:\vcpkg
