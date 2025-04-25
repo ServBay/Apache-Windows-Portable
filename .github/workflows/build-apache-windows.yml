@@ -188,15 +188,15 @@ jobs:
 
       - name: Build Apache
         shell: cmd
-        working-directory: ${{ env.SOURCE_DIR }}/httpd-${{ env.APACHE_VERSION }}
+        working-directory: ${{ env.SOURCE_DIR }}/httpd-${{ env.APACHE_VERSION }}/build
         run: |
-          cmake --build build --config Release --parallel
+          cmake --build . --config Release --parallel
 
       - name: Install Apache
         shell: cmd
-        working-directory: ${{ env.SOURCE_DIR }}/httpd-${{ env.APACHE_VERSION }}
+        working-directory: ${{ env.SOURCE_DIR }}/httpd-${{ env.APACHE_VERSION }}/build
         run: |
-          cmake --build build --config Release --target install
+          cmake --build . --config Release --target install
 
       - name: Adjust httpd.conf for Portability
         shell: pwsh
