@@ -133,8 +133,8 @@ jobs:
               -DCMAKE_INSTALL_PREFIX="${{ env.INSTALL_DIR }}" ^
               -DCMAKE_TOOLCHAIN_FILE="%VCPKG_TOOLCHAIN_FILE%" ^
               -DVCPKG_TARGET_TRIPLET="${{ env.VCPKG_TRIPLET }}" ^
-              -DAPR_INCLUDE_DIR="httpd-${{ env.APACHE_VERSION }}/srclib/apr" ^
-              -DAPU_INCLUDE_DIR="httpd-${{ env.APACHE_VERSION }}/srclib/apr-util" ^
+              -DAPR_INCLUDE_DIR="../srclib/apr/include" ^
+              -DAPU_INCLUDE_DIR="../srclib/apr-util/include" ^
               -DINSTALL_LAYOUT="Relocatable" ^
               -DENABLE_MODULES="shared" ^
               -DENABLE_MPMS="winnt" ^
