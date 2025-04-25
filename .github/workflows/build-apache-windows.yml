@@ -1,0 +1,177 @@
+# .github/workflows/build-apache-windows.yml
+name: Build Portable Apache (Windows x64)
+
+on:
+  workflow_dispatch:
+    inputs:
+      apache_version:
+        description: 'Apache HTTP Server version (e.g., 2.4.59)'
+        required: true
+        type: string
+
+jobs:
+  build:
+    runs-on: windows-latest
+    permissions:
+      contents: write # Needed to create releases and upload assets
+
+    steps:
+    - name: Harden Runner
+      uses: step-security/harden-runner@v2.7.0 # v2.7.0
+      with:
+        egress-policy: audit # TODO: change to 'egress-policy: block' after couple of runs
+
+    - name: Check out code (optional, if you need repo files)
+      uses: actions/checkout@v4.1.1 # v4.1.1
+
+    - name: Install vcpkg
+      uses: lukka/run-vcpkg@v11 # v11
+      with:
+        vcpkgDirectory: '${{ runner.temporary }}/vcpkg'
+        vcpkgGitCommitId: '7d259227a1fb6471a0253dd5ab7419835228f7d7' # Use a specific commit for stability
+
+    - name: Install Dependencies via vcpkg
+      run: |
+        $vcpkg_root = '${{ runner.temporary }}/vcpkg'
+        # Install dependencies for x64 Windows. Using dynamic linking for broader compatibility initially.
+        # Add other dependencies if needed based on specific modules
+        & "$vcpkg_root/vcpkg" install apr apr-util openssl pcre2 zlib libxml2 nghttp2 brotli --triplet x64-windows
+      shell: pwsh
+
+    - name: Download Apache Source
+      run: |
+        $apache_version = "${{ inputs.apache_version }}"
+        $url = "https://archive.apache.org/dist/httpd/httpd-$apache_version.tar.gz"
+        $output_file = "httpd-$apache_version.tar.gz"
+        Write-Host "Downloading Apache $apache_version from $url"
+        Invoke-WebRequest -Uri $url -OutFile $output_file
+        # Extract the tar.gz archive
+        tar -xzf $output_file
+      shell: pwsh
+
+    - name: Configure Apache with CMake
+      run: |
+        $apache_version = "${{ inputs.apache_version }}"
+        $source_dir = "${{ github.workspace }}/httpd-$apache_version"
+        $build_dir = "${{ github.workspace }}/build"
+        $install_dir = "${{ github.workspace }}/apache-install" # Relative install path
+        $vcpkg_root = '${{ runner.temporary }}/vcpkg'
+        $vcpkg_toolchain = "$vcpkg_root/scripts/buildsystems/vcpkg.cmake"
+
+        cmake -S "$source_dir" -B "$build_dir" `
+          -DCMAKE_TOOLCHAIN_FILE="$vcpkg_toolchain" `
+          -DCMAKE_INSTALL_PREFIX="$install_dir" `
+          -DCMAKE_BUILD_TYPE=Release `
+          -DINSTALL_LAYOUT=Relocatable ` # Use relocatable layout for portability
+          -DRELOCATABLE=ON `             # Enable relocatable build
+          -DENABLE_MODS_SHARED=all `     # Build most modules as shared
+          -DENABLE_MPMS_SHARED=all `     # Build MPMs as shared (winnt is typical)
+          # --- Enable specific modules based on your needs ---
+          # Core features often enabled by default or via other flags
+          -DENABLE_DEFLATE=ON `
+          -DENABLE_HEADERS=ON `
+          -DENABLE_INCLUDE=ON `
+          -DENABLE_REWRITE=ON `
+          -DENABLE_VHOST_ALIAS=ON `
+          -DENABLE_AUTHNZ_FCGI=ON `
+          -DENABLE_CGI=ON `
+          -DENABLE_REMOTEIP=ON `
+          -DENABLE_REQUEST=ON `
+          # Proxy modules
+          -DENABLE_PROXY=ON `
+          -DENABLE_PROXY_CONNECT=ON `
+          -DENABLE_PROXY_FTP=ON `
+          -DENABLE_PROXY_HTTP=ON `
+          -DENABLE_PROXY_FCGI=ON `
+          -DENABLE_PROXY_SCGI=ON `
+          -DENABLE_PROXY_UWSGI=ON `
+          -DENABLE_PROXY_WSTUNNEL=ON `
+          -DENABLE_PROXY_BALANCER=ON `
+          -DENABLE_PROXY_HCHECK=ON `
+          # SSL/TLS
+          -DENABLE_SSL=ON `
+          -DOPENSSL_ROOT_DIR="$($vcpkg_root)/installed/x64-windows" ` # Help CMake find OpenSSL via vcpkg
+          # HTTP/2
+          -DENABLE_HTTP2=ON `
+          -DENABLE_PROXY_HTTP2=ON `
+          # Cache modules
+          -DENABLE_CACHE=ON `
+          -DENABLE_CACHE_DISK=ON ` # Example cache module
+          # Session modules
+          -DENABLE_SESSION=ON `
+          -DENABLE_SESSION_COOKIE=ON ` # Example session module
+          # WebDAV modules
+          -DENABLE_DAV=ON `
+          -DENABLE_DAV_FS=ON ` # Example DAV module
+          # Dependencies (vcpkg should handle finding these via toolchain)
+          -DHAVE_APR=1 `
+          -DHAVE_APR_UTIL=1 `
+          -DHAVE_BROTLI=1 `
+          -DHAVE_LIBXML2=1 `
+          -DHAVE_NGHTTP2=1 `
+          -DHAVE_OPENSSL=1 `
+          -DHAVE_PCRE2=1 `
+          -DHAVE_ZLIB=1 `
+          # --- Disable unwanted modules ---
+          -DENABLE_LUA=OFF `
+          -DENABLE_LUAJIT=OFF
+
+      shell: pwsh
+
+    - name: Build Apache
+      run: |
+        cmake --build "${{ github.workspace }}/build" --config Release --parallel
+      shell: pwsh
+
+    - name: Install Apache
+      run: |
+        cmake --install "${{ github.workspace }}/build" --config Release
+      shell: pwsh
+
+    - name: Make Configuration Portable (Adjust Paths in httpd.conf)
+      run: |
+        $install_dir = "${{ github.workspace }}/apache-install"
+        $conf_file = Join-Path $install_dir "conf/httpd.conf"
+
+        if (Test-Path $conf_file) {
+          Write-Host "Adjusting paths in $conf_file for portability..."
+          # Use ServerRoot-relative paths where possible
+          (Get-Content $conf_file -Raw) -replace 'Define SRVROOT ".*?"', 'Define SRVROOT "."' `
+                                       -replace 'ServerRoot ".*?"', 'ServerRoot "${SRVROOT}"' `
+                                       -replace 'DocumentRoot ".*?"', 'DocumentRoot "${SRVROOT}/htdocs"' `
+                                       -replace '(<Directory ")C:/.*?/htdocs(">)', '$1${SRVROOT}/htdocs$2' `
+                                       -replace 'ScriptAlias /cgi-bin/ ".*?"', 'ScriptAlias /cgi-bin/ "${SRVROOT}/cgi-bin/"' `
+                                       -replace '(<Directory ")C:/.*?/cgi-bin(">)', '$1${SRVROOT}/cgi-bin$2' `
+                                       -replace 'ErrorLog ".*?"', 'ErrorLog "logs/error.log"' `
+                                       -replace 'CustomLog ".*?" common', 'CustomLog "logs/access.log" common' `
+                                       -replace 'PidFile ".*?"', 'PidFile "logs/httpd.pid"' `
+                                       -replace 'LoadModule (.*?) ".*?/mod_$1.so"', 'LoadModule $1 "modules/mod_$1.so"' | Set-Content $conf_file -Encoding UTF8
+          Write-Host "Paths adjusted."
+        } else {
+          Write-Warning "$conf_file not found. Skipping path adjustments."
+        }
+      shell: pwsh
+
+    - name: Package Apache into ZIP Archive
+      run: |
+        $apache_version = "${{ inputs.apache_version }}"
+        $install_dir = "${{ github.workspace }}/apache-install"
+        $zip_filename = "apache-${apache_version}-win-x64.zip"
+        Compress-Archive -Path "$install_dir/*" -DestinationPath "${{ github.workspace }}/$zip_filename" -Force
+        Write-Host "Created $zip_filename"
+      shell: pwsh
+
+    - name: Create GitHub Release and Upload Asset
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: "v${{ inputs.apache_version }}"
+        name: "Apache HTTP Server ${{ inputs.apache_version }} (Windows x64 Portable)"
+        body: |
+          Portable build of Apache HTTP Server ${{ inputs.apache_version }} for Windows x64.
+          Compiled with MSVC via GitHub Actions.
+          Includes common modules as shared libraries.
+        files: |
+          ${{ github.workspace }}/apache-*.zip
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
