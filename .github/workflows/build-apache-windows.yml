@@ -21,7 +21,7 @@ env:
   SOURCE_DIR: ${{ github.workspace }}/source # Directory to store downloaded sources
   INSTALL_DIR: ${{ github.workspace }}/apache-install # Temporary install dir before packaging
   VCPKG_ROOT: ${{ github.workspace }}/vcpkg
-  VCPKG_COMMIT_ID: 'a9e343b5647ca11f86646037f369111e9c8a878a' # Pin vcpkg commit for reproducibility, check for newer stable commits
+  VCPKG_COMMIT_ID: '760bfd0c8d7c89ec640aec4df89418b7c2745605' # Pin vcpkg commit for reproducibility, check for newer stable commits
   VCPKG_TRIPLET: x64-windows
 
 jobs:
