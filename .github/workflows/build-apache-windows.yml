@@ -12,7 +12,7 @@ env:
   # Apache 版本和源码 URL
   APACHE_VERSION: ${{ github.event.inputs.apache_version }}
   APACHE_MAJOR_VERSION: # Will be extracted later
-  APR_VERSION: 1.7.4 # Adjust if needed for the target Apache version
+  APR_VERSION: 1.7.5 # Adjust if needed for the target Apache version
   APR_UTIL_VERSION: 1.6.3 # Adjust if needed for the target Apache version
   APACHE_MIRROR: https://dlcdn.apache.org/httpd
   APR_MIRROR: https://dlcdn.apache.org/apr
