@@ -112,7 +112,12 @@ jobs:
           echo "Downloading $url to $downloadPath"
           Invoke-WebRequest -Uri $url -OutFile $downloadPath
           echo "Extracting $downloadPath to $extractDir"
-          tar -zxf $downloadPath -C $extractDir --strip-components=1
+          # Handle .tar.xz (common formats)
+          if ($archiveName -like '*.tar.xz') {
+            xz -dc $downloadPath | tar -xf - -C $extractDir --strip-components=1
+          } else {
+            tar -zxf $downloadPath -C $extractDir --strip-components=1
+          }
           # Remove the archive after extraction
           Remove-Item $downloadPath
         }
