@@ -119,7 +119,7 @@ jobs:
             tar -zxf $downloadPath -C $extractDir --strip-components=1
           }
           # Remove the archive after extraction
-          Remove-Item $downloadPath
+          # Remove-Item $downloadPath
         }
 
         $baseSrcPath = Join-Path $env:GITHUB_WORKSPACE "src"
