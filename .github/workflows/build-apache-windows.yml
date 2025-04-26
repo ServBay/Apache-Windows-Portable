@@ -130,7 +130,7 @@ jobs:
           "pcre2-10.45"         = "https://github.com/PCRE2Project/pcre2/releases/download/pcre2-10.45/pcre2-10.45.tar.gz"
           "expat-2.7.1"         = "https://github.com/libexpat/libexpat/releases/download/R_2_7_1/expat-2.7.1.tar.gz"
           "openssl-3.3.3"       = "https://www.openssl.org/source/openssl-3.3.3.tar.gz"
-          "libxml2-2.14.1"      = "https://gitlab.gnome.org/GNOME/libxml2/-/archive/v2.14.1/libxml2-v2.14.1.tar.gz"
+          "libxml2-2.14.1"      = "https://github.com/GNOME/libxml2/archive/refs/tags/v2.14.1.tar.gz"
           "jansson-2.14.1"      = "https://github.com/akheron/jansson/releases/download/v2.14.1/jansson-2.14.1.tar.gz"
           "brotli-1.1.0"        = "https://github.com/google/brotli/archive/refs/tags/v1.1.0.tar.gz"
           "lua-5.4.7"           = "https://www.lua.org/ftp/lua-5.4.7.tar.gz"
