@@ -1,4 +1,4 @@
-name: Build Apache on Windows
+name: Build Apache on Windows with RDP Debug Pause
 
 on:
 #   push:
@@ -26,40 +26,28 @@ jobs:
         echo "C:\Program Files\7-Zip" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
       shell: powershell
 
+    # --- MODIFIED: Added output for rdp_url ---
     - name: Setup RDP
       id: setup-rdp
       shell: pwsh
       env:
-        # 从 Secrets 传入 ngrok Authtoken 和 RDP 密码
         NGROK_AUTH_TOKEN: ${{ secrets.NGROK_AUTH_TOKEN }}
         RDP_PASSWORD: ${{ secrets.RDP_PASSWORD }}
       run: |
         $ngrokLogFile = "$env:GITHUB_WORKSPACE\ngrok.log"
         $ngrokProcess = $null
         $rdpUser = "runneradmin"
+        $rdpUrlOutput = "" # Variable to hold the URL for output
 
-        # 检查 NGROK_AUTH_TOKEN 和 RDP_PASSWORD 是否设置
-        if ([string]::IsNullOrEmpty($env:NGROK_AUTH_TOKEN)) {
-          Write-Error "NGROK_AUTH_TOKEN secret is not set. Cannot start RDP session."
-          exit 1
-        }
-        if ([string]::IsNullOrEmpty($env:RDP_PASSWORD)) {
-          Write-Error "RDP_PASSWORD secret is not set. Cannot create RDP user."
-          exit 1
-        }
+        if ([string]::IsNullOrEmpty($env:NGROK_AUTH_TOKEN)) { Write-Error "NGROK_AUTH_TOKEN secret is not set."; exit 1 }
+        if ([string]::IsNullOrEmpty($env:RDP_PASSWORD)) { Write-Error "RDP_PASSWORD secret is not set."; exit 1 }
 
-        # --- 创建 RDP 用户并设置密码 ---
         Write-Host "Setting RDP user '$rdpUser'..."
         try {
-          Write-Host "Setting password for user '$rdpUser'..."
           $securePassword = ConvertTo-SecureString -String $env:RDP_PASSWORD -AsPlainText -Force
           try { Get-LocalUser -Name $rdpUser | Set-LocalUser -Password $securePassword -ErrorAction Stop; Write-Host "Password set via Set-LocalUser."}
           catch { Write-Warning "Set-LocalUser failed: $($_.Exception.Message). Trying 'net user'..."; iex "net user $rdpUser '$($env:RDP_PASSWORD)'"; if ($LASTEXITCODE -ne 0) { throw "net user failed too."}; Write-Host "Password set via 'net user'." }
-        } catch {
-          Write-Error "Failed to configure RDP user '$rdpUser': $_"
-          if (Get-LocalUser -Name $rdpUser -ErrorAction SilentlyContinue) { Remove-LocalUser -Name $rdpUser -ErrorAction SilentlyContinue }
-          exit 1
-        }
+        } catch { Write-Error "Failed to configure RDP user '$rdpUser': $_"; if (Get-LocalUser -Name $rdpUser -ErrorAction SilentlyContinue) { Remove-LocalUser -Name $rdpUser -ErrorAction SilentlyContinue }; exit 1 }
 
         Write-Host "Ensuring RDP is enabled..."
         try {
@@ -73,10 +61,10 @@ jobs:
         catch {
           Write-Warning "Chocolatey install failed or choco not found. Attempting manual download..."
           $ngrokZip = "$env:TEMP\ngrok.zip"; $ngrokExe = "$env:TEMP\ngrok.exe"
-          Invoke-WebRequest "https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-windows-amd64.zip" -OutFile $ngrokZip
-          Expand-Archive $ngrokZip -DestinationPath $env:TEMP -Force
-          Move-Item "$env:TEMP\ngrok.exe" $ngrokExe -Force
-          Remove-Item $ngrokZip -Force
+          Invoke-WebRequest "https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-windows-amd64.zip" -OutFile $ngrokZip -ErrorAction Stop
+          Expand-Archive $ngrokZip -DestinationPath $env:TEMP -Force -ErrorAction Stop
+          Move-Item "$env:TEMP\ngrok.exe" $ngrokExe -Force -ErrorAction Stop
+          Remove-Item $ngrokZip -Force -ErrorAction Stop
           $env:PATH += ";$env:TEMP"
         }
         if (-not (Get-Command ngrok -ErrorAction SilentlyContinue)) { Write-Error "ngrok command not found after installation attempts."; Remove-LocalUser -Name $rdpUser -ErrorAction SilentlyContinue; exit 1 }
@@ -91,54 +79,82 @@ jobs:
           Start-Sleep -Seconds 15
           $rdpUrl = $null; $maxAttempts = 5; $attempt = 0
           while ($attempt -lt $maxAttempts -and -not $rdpUrl) {
-              $attempt++; if (Test-Path $ngrokLogFile) { $logContent = Get-Content $ngrokLogFile -Raw -ErrorAction SilentlyContinue; $match = $logContent | Select-String -Pattern 'url=(tcp://[^ ]+)'; if ($match) { $rdpUrl = $match.Matches[0].Groups[1].Value; Write-Host "RDP Connection URL found: $rdpUrl"; break } }
+              $attempt++; if (Test-Path $ngrokLogFile) { $logContent = Get-Content $ngrokLogFile -Raw -ErrorAction SilentlyContinue; $match = $logContent | Select-String -Pattern 'url=(tcp://[^ ]+)'; if ($match) { $rdpUrl = $match.Matches[0].Groups[1].Value; Write-Host "RDP Connection URL found: $rdpUrl"; $rdpUrlOutput = $rdpUrl; break } }
               Write-Host "Waiting for ngrok URL in log... (Attempt $attempt/$maxAttempts)"; Start-Sleep -Seconds 5
           }
-          if (-not $rdpUrl) { Write-Error "Failed to retrieve RDP connection URL from ngrok log ($ngrokLogFile) after $maxAttempts attempts."; if ($ngrokProcess) { Stop-Process -Id $ngrokProcess.Id -Force -ErrorAction SilentlyContinue }; Remove-LocalUser -Name $rdpUser -ErrorAction SilentlyContinue; exit 1 }
+          if (-not $rdpUrl) { throw "Failed to retrieve RDP connection URL from ngrok log ($ngrokLogFile) after $maxAttempts attempts." }
           Write-Host "----------------------------------------------------------------------"
-          Write-Host "ACTION REQUIRED: Manual installation needed via RDP."
+          Write-Host "RDP is ready for connection if needed."
           Write-Host "Connect using an RDP client to: $rdpUrl"
           Write-Host "Username: $rdpUser"
           Write-Host "Password: Use the value from your RDP_PASSWORD secret."
           Write-Host "----------------------------------------------------------------------"
-        } catch { Write-Error "Failed to start ngrok process: $_"; if ($ngrokProcess) { Stop-Process -Id $ngrokProcess.Id -Force -ErrorAction SilentlyContinue }; Remove-LocalUser -Name $rdpUser -ErrorAction SilentlyContinue; exit 1 }
+          # --- Set the output variable ---
+          echo "::set-output name=rdp_url::$rdpUrlOutput"
+        } catch {
+          Write-Error "Failed during ngrok setup or tunnel retrieval: $_"
+          if ($ngrokProcess) { Stop-Process -Id $ngrokProcess.Id -Force -ErrorAction SilentlyContinue }
+          if (Get-LocalUser -Name $rdpUser -ErrorAction SilentlyContinue) { Remove-LocalUser -Name $rdpUser -ErrorAction SilentlyContinue }
+          exit 1
+        }
 
     - name: Create Source Directory
       run: mkdir src
-      shell: cmd # Use cmd for simple directory creation
+      shell: cmd
 
+    # --- MODIFIED: Added try/catch and pause logic ---
     - name: Download and Extract Dependencies
-      shell: powershell # Use PowerShell for better scripting capabilities
+      shell: powershell
       run: |
+        # Helper function for pausing
+        function Pause-For-RdpDebug($errorMessage) {
+            Write-Error "ERROR ENCOUNTERED: $errorMessage"
+            Write-Host "----------------------------------------------------------------------"
+            Write-Host "WORKFLOW PAUSED FOR DEBUGGING (Max ~6 hours)"
+            Write-Host "Connect via RDP to investigate."
+            Write-Host "RDP URL: ${{ steps.setup-rdp.outputs.rdp_url }}" # Use output from previous step
+            Write-Host "Username: runneradmin"
+            Write-Host "Password: Use your RDP_PASSWORD secret."
+            Write-Host "The runner will remain active for debugging. Manually cancel the job when done."
+            Write-Host "----------------------------------------------------------------------"
+            Start-Sleep -Seconds 21600 # Pause for 6 hours
+            # After sleep/timeout, exit with error to mark step as failed
+            exit 1
+        }
+
         # Helper function for downloading and extracting
         function Get-AndExtract($url, $archiveName, $extractDir) {
           $downloadPath = Join-Path $env:RUNNER_TEMP $archiveName
-          echo "Downloading $url to $downloadPath"
-          Invoke-WebRequest -Uri $url -OutFile $downloadPath
-          echo "Extracting $downloadPath to $extractDir"
-          # Handle .tar.gz and .tar.xz (common formats)
-          if ($archiveName -like '*.tar.gz' -or $archiveName -like '*.tar.xz') {
-            # Extract the tar from the archive first, then extract the contents
-            7z x $downloadPath -so | 7z x -aoa -si -ttar -o"$extractDir"
-          } elseif ($archiveName -like '*.zip') {
-             7z x $downloadPath -aoa -o"$extractDir"
-          } else {
-             echo "ERROR: Unsupported archive type for $archiveName"
-             exit 1
+          try {
+              Write-Host "Downloading $url to $downloadPath"
+              Invoke-WebRequest -Uri $url -OutFile $downloadPath -ErrorAction Stop
+              Write-Host "Extracting $downloadPath to $extractDir"
+              # Use 7z with ErrorAction Stop
+              if ($archiveName -like '*.tar.gz' -or $archiveName -like '*.tar.xz') {
+                  # 7z can fail, so check exit code
+                  & 7z x $downloadPath -so | & 7z x -aoa -si -ttar -o"$extractDir"
+                  if ($LASTEXITCODE -ne 0) { throw "7z extraction failed for $archiveName (tar stage)" }
+              } elseif ($archiveName -like '*.zip') {
+                  & 7z x $downloadPath -aoa -o"$extractDir"
+                  if ($LASTEXITCODE -ne 0) { throw "7z extraction failed for $archiveName (zip stage)" }
+              } else {
+                  throw "Unsupported archive type for $archiveName"
+              }
+              # Remove the archive after extraction
+              Remove-Item $downloadPath -Force -ErrorAction Stop
+          } catch {
+              # Call the pause function on error within Get-AndExtract
+              Pause-For-RdpDebug "Failed during download/extract of '$archiveName': $($_.Exception.Message)"
           }
-          # Remove the archive after extraction
-          Remove-Item $downloadPath
         }
 
         $baseSrcPath = Join-Path $env:GITHUB_WORKSPACE "src"
 
-        # Define packages and URLs
         $packages = @{
           "zlib-1.3.1"          = "https://zlib.net/zlib-1.3.1.tar.gz"
           "pcre2-10.45"         = "https://github.com/PCRE2Project/pcre2/releases/download/pcre2-10.45/pcre2-10.45.tar.gz"
           "expat-2.7.1"         = "https://github.com/libexpat/libexpat/releases/download/R_2_7_1/expat-2.7.1.tar.gz"
           "openssl-3.3.3"       = "https://www.openssl.org/source/openssl-3.3.3.tar.gz"
-          # "openssl-1.1.1w"      = "https://www.openssl.org/source/openssl-1.1.1w.tar.gz"
           "libxml2-2.14.1"      = "https://download.gnome.org/sources/libxml2/2.14/libxml2-2.14.1.tar.xz"
           "jansson-2.14.1"      = "https://github.com/akheron/jansson/releases/download/v2.14.1/jansson-2.14.1.tar.gz"
           "brotli-1.1.0"        = "https://github.com/google/brotli/archive/refs/tags/v1.1.0.tar.gz"
@@ -152,115 +168,147 @@ jobs:
           "mod_fcgid-2.3.9"     = "https://dlcdn.apache.org/httpd/mod_fcgid/mod_fcgid-2.3.9.tar.gz"
         }
 
-        # Download and extract each package
-        foreach ($pkgName in $packages.Keys) {
-          $url = $packages[$pkgName]
-          $archiveName = $url.Split('/')[-1]
-          $finalExtractPath = Join-Path $baseSrcPath $pkgName # Final destination
+        # Wrap the main loop in try/catch
+        try {
+            foreach ($pkgName in $packages.Keys) {
+                $url = $packages[$pkgName]
+                $archiveName = $url.Split('/')[-1]
+                $finalExtractPath = Join-Path $baseSrcPath $pkgName
+                $tempExtractDir = Join-Path $baseSrcPath "$($pkgName)-temp-extract"
 
-          # Use a temporary directory for the initial extraction output
-          $tempExtractDir = Join-Path $baseSrcPath "$($pkgName)-temp-extract"
-          if (Test-Path $finalExtractPath) { Remove-Item $finalExtractPath -Recurse -Force }
-          if (Test-Path $tempExtractDir) { Remove-Item $tempExtractDir -Recurse -Force }
+                if (Test-Path $finalExtractPath) { Remove-Item $finalExtractPath -Recurse -Force -ErrorAction SilentlyContinue } # Continue if removal fails slightly
+                if (Test-Path $tempExtractDir) { Remove-Item $tempExtractDir -Recurse -Force -ErrorAction SilentlyContinue }
 
-          # Call the updated extraction function, extracting *into* tempExtractDir
-          Get-AndExtract -url $url -archiveName $archiveName -extractDir $tempExtractDir
+                # Call the extraction function (it has its own try/catch now)
+                Get-AndExtract -url $url -archiveName $archiveName -extractDir $tempExtractDir
 
-          # --- Logic to handle nested folders after extraction ---
-          $extractedItems = Get-ChildItem -Path $tempExtractDir -Force
-          if ($extractedItems.Count -eq 1 -and $extractedItems[0].PSIsContainer) {
-              $extractedFolder = $extractedItems[0]
-              echo "Single folder '$($extractedFolder.Name)' found in temp extraction path. Moving/Renaming to $finalExtractPath"
-              Move-Item -Path $extractedFolder.FullName -Destination $finalExtractPath -Force
-          } elseif ($extractedItems.Count -gt 0) {
-              echo "Multiple files/folders found in temp extraction path. Moving contents to $finalExtractPath"
-              if (-not (Test-Path $finalExtractPath)) { mkdir $finalExtractPath }
-              Move-Item -Path (Join-Path $tempExtractDir "*") -Destination $finalExtractPath -Force
-          } else {
-              echo "ERROR: No items found in $tempExtractDir after Get-AndExtract function for $pkgName."
-              exit 1
-          }
-          # Clean up the temporary extraction parent directory
-          if (Test-Path $tempExtractDir) { Remove-Item $tempExtractDir -Recurse -Force }
-          # --- End folder handling logic ---
+                # --- Logic to handle nested folders (wrap this in try/catch too) ---
+                try {
+                    $extractedItems = Get-ChildItem -Path $tempExtractDir -Force -ErrorAction Stop
+                    if ($extractedItems.Count -eq 1 -and $extractedItems[0].PSIsContainer) {
+                        $extractedFolder = $extractedItems[0]
+                        Write-Host "Single folder '$($extractedFolder.Name)' found. Moving/Renaming to $finalExtractPath"
+                        Move-Item -Path $extractedFolder.FullName -Destination $finalExtractPath -Force -ErrorAction Stop
+                    } elseif ($extractedItems.Count -gt 0) {
+                        Write-Host "Multiple items found. Moving contents to $finalExtractPath"
+                        if (-not (Test-Path $finalExtractPath)) { mkdir $finalExtractPath -ErrorAction Stop }
+                        Move-Item -Path (Join-Path $tempExtractDir "*") -Destination $finalExtractPath -Force -ErrorAction Stop
+                    } else {
+                        throw "No items found in $tempExtractDir after extraction for $pkgName."
+                    }
+                    if (Test-Path $tempExtractDir) { Remove-Item $tempExtractDir -Recurse -Force -ErrorAction Stop }
+                } catch {
+                    Pause-For-RdpDebug "Failed during post-extraction file handling for '$pkgName': $($_.Exception.Message)"
+                }
+                # --- End folder handling logic ---
 
-          # Verify final extraction directory exists and is not empty
-          if (-not (Test-Path $finalExtractPath) -or (Get-ChildItem -Path $finalExtractPath -Force).Count -eq 0) {
-            echo "ERROR: Final directory $finalExtractPath verification failed for $pkgName."
-            exit 1
-          } else {
-             echo "Successfully prepared $pkgName in $finalExtractPath"
-          }
-        } # End foreach package
+                # Final verification
+                if (-not (Test-Path $finalExtractPath) -or (Get-ChildItem -Path $finalExtractPath -Force -ErrorAction Stop).Count -eq 0) {
+                    Pause-For-RdpDebug "Final directory $finalExtractPath verification failed for $pkgName."
+                } else {
+                    Write-Host "Successfully prepared $pkgName in $finalExtractPath"
+                }
+            } # End foreach package
+            Write-Host "All dependencies downloaded and extracted successfully."
+        } catch {
+             # Catch errors not caught by inner try/catch blocks (less likely now)
+             Pause-For-RdpDebug "An unexpected error occurred in the main dependency loop: $($_.Exception.Message)"
+        }
 
     - name: Set up MSBuild and VS Environment
-      uses: microsoft/setup-msbuild@v2 # Sets up MSBuild and VS dev environment
+      uses: microsoft/setup-msbuild@v2
 
     - name: Set VCVARSALL environment variable
       id: set_vcvars
       shell: powershell
       run: |
         $vcvarsPath = ""
-        # Try finding via VCINSTALLDIR (often set by VS setup actions)
-        if ($env:VCINSTALLDIR) {
-          $potentialPath = Join-Path $env:VCINSTALLDIR "Auxiliary\Build\vcvars64.bat"
-          if (Test-Path $potentialPath) {
-            $vcvarsPath = $potentialPath
-            echo "Found vcvarsall.bat via VCINSTALLDIR: $vcvarsPath"
-          }
-        }
+        # Try common paths, add more specific paths if needed based on runner images
+        $potentialPaths = @(
+            (Join-Path $env:VCINSTALLDIR "Auxiliary\Build\vcvars64.bat" -ErrorAction SilentlyContinue),
+            "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat",
+            "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat",
+            "C:\Program Files (x86)\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat",
+            "C:\Program Files (x86)\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat"
+        )
 
-        # Fallback to default VS 2022 Enterprise path if not found yet
-        if (-not $vcvarsPath) {
-          $potentialPath = "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
-          if (Test-Path $potentialPath) {
-            $vcvarsPath = $potentialPath
-            echo "Found vcvarsall.bat via default VS 2022 Enterprise path: $vcvarsPath"
-          }
-        }
-
-        # Fallback to default VS 2022 Community path
-        if (-not $vcvarsPath) {
-            $potentialPath = "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat"
-            if (Test-Path $potentialPath) {
-                $vcvarsPath = $potentialPath
-                echo "Found vcvarsall.bat via default VS 2022 Community path: $vcvarsPath"
+        foreach ($path in $potentialPaths) {
+            if ($path -and (Test-Path $path -PathType Leaf)) {
+                $vcvarsPath = $path
+                Write-Host "Found vcvars64.bat at: $vcvarsPath"
+                break
             }
         }
 
-        # Fallback to (x86) path (less likely for VS 2022 but check just in case)
-        if (-not $vcvarsPath) {
-          $potentialPath = "C:\Program Files (x86)\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
-           if (Test-Path $potentialPath) {
-            $vcvarsPath = $potentialPath
-            echo "Found vcvarsall.bat via (x86) VS 2022 Enterprise path: $vcvarsPath"
-          }
-        }
-
         if ($vcvarsPath) {
-          echo "Setting VCVARSALL environment variable."
-          # Use GitHub Actions environment file syntax to set for subsequent steps
-          echo "VCVARSALL=$vcvarsPath" >> $env:GITHUB_ENV
+            Write-Host "Setting VCVARSALL environment variable."
+            echo "VCVARSALL=$vcvarsPath" >> $env:GITHUB_ENV
         } else {
-          echo "ERROR: Could not locate vcvars64.bat. Build might fail."
-          # Optionally fail the job: exit 1
+            # Use the Pause function if vcvars not found
+            # Define it again or make it globally available if needed in multiple steps
+            function Pause-For-RdpDebug($errorMessage) {
+                 Write-Error "ERROR ENCOUNTERED: $errorMessage"
+                 Write-Host "----------------------------------------------------------------------"
+                 Write-Host "WORKFLOW PAUSED FOR DEBUGGING (Max ~6 hours)"
+                 Write-Host "Connect via RDP to investigate."
+                 Write-Host "RDP URL: ${{ steps.setup-rdp.outputs.rdp_url }}"
+                 Write-Host "Username: runneradmin"
+                 Write-Host "Password: Use your RDP_PASSWORD secret."
+                 Write-Host "The runner will remain active for debugging. Manually cancel the job when done."
+                 Write-Host "----------------------------------------------------------------------"
+                 Start-Sleep -Seconds 21600
+                 exit 1
+            }
+            Pause-For-RdpDebug "Could not locate vcvars64.bat. Cannot proceed with build."
         }
 
+    # --- MODIFIED: Use PowerShell wrapper for try/catch ---
     - name: Run Build Script
       env:
-        # Set environment variables for the modified build script
         BUILD_BASE_ENV: ${{ github.workspace }}\build
         PREFIX_ENV: C:\ServBay\packages\apache
-        # VCVARSALL should be implicitly set by setup-msbuild, but double-check if issues arise
+        # VCVARSALL is set in the environment by the previous step
+      shell: powershell # Change shell to powershell
       run: |
-        echo "VCVARSALL is set to: %VCVARSALL%"
-        echo "Starting build_all.bat..."
-        call build_all.bat
-      shell: cmd # Use cmd to run the batch script
+        # Define the pause function again or ensure it's available
+        function Pause-For-RdpDebug($errorMessage) {
+            Write-Error "ERROR ENCOUNTERED: $errorMessage"
+            Write-Host "----------------------------------------------------------------------"
+            Write-Host "WORKFLOW PAUSED FOR DEBUGGING (Max ~6 hours)"
+            Write-Host "Connect via RDP to investigate."
+            Write-Host "RDP URL: ${{ steps.setup-rdp.outputs.rdp_url }}"
+            Write-Host "Username: runneradmin"
+            Write-Host "Password: Use your RDP_PASSWORD secret."
+            Write-Host "The runner will remain active for debugging. Manually cancel the job when done."
+            Write-Host "----------------------------------------------------------------------"
+            Start-Sleep -Seconds 21600 # Pause for 6 hours
+            exit 1
+        }
+
+        Write-Host "VCVARSALL is set to: $env:VCVARSALL"
+        if (-not $env:VCVARSALL) {
+             Pause-For-RdpDebug "VCVARSALL environment variable is not set before calling build script."
+        }
+
+        Write-Host "Starting build_all.bat..."
+        try {
+            # Execute the batch script using cmd /c
+            # Ensure VCVARSALL is used by the cmd environment if needed within the bat script itself
+            # (Often build scripts call vcvars internally, but good practice)
+            cmd /c "call `"$env:VCVARSALL`" > nul && call build_all.bat"
+            # Check the exit code of the last command run by cmd
+            if ($LASTEXITCODE -ne 0) {
+                throw "build_all.bat failed with exit code $LASTEXITCODE"
+            }
+            Write-Host "build_all.bat completed successfully."
+        } catch {
+            # Call the pause function on error
+            Pause-For-RdpDebug "Build script execution failed: $($_.Exception.Message)"
+        }
 
     - name: Upload Build Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: apache-windows-build # Name of the artifact zip file
-        path: C:\ServBay\packages\apache # Path to the directory to upload
-        if-no-files-found: error # Fail the step if the directory is empty or not found
+        name: apache-windows-build
+        path: C:\ServBay\packages\apache
+        if-no-files-found: error # Keep this, if build fails and pauses, this won't run anyway
