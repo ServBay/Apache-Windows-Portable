@@ -166,6 +166,14 @@ jobs:
           }
         }
 
+
+    - name: Copy CMakeLists.txt to lua-5.4.7
+      shell: powershell
+      run: |
+        $baseSrcPath = Join-Path $env:GITHUB_WORKSPACE "src"
+        $extractPath = Join-Path $baseSrcPath "lua-5.4.7"
+        Copy-Item "lua-5.4.7\CMakeLists.txt" -Destination $extractPath
+
     - name: Set up MSBuild and VS Environment
       uses: microsoft/setup-msbuild@v2 # Sets up MSBuild and VS dev environment
 
