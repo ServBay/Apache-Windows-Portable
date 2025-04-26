@@ -156,42 +156,18 @@ jobs:
         foreach ($pkgName in $packages.Keys) {
           $url = $packages[$pkgName]
           $archiveName = $url.Split('/')[-1]
-          $finalExtractPath = Join-Path $baseSrcPath $pkgName # Final destination
+          $extractPath = Join-Path $baseSrcPath $pkgName
 
-          # Use a temporary directory for the initial extraction output
-          $tempExtractDir = Join-Path $baseSrcPath "$($pkgName)-temp-extract"
-          if (Test-Path $finalExtractPath) { Remove-Item $finalExtractPath -Recurse -Force }
-          if (Test-Path $tempExtractDir) { Remove-Item $tempExtractDir -Recurse -Force }
+          Get-AndExtract -url $url -archiveName $archiveName -extractDir $extractPath
 
-          # Call the updated extraction function, extracting *into* tempExtractDir
-          Get-AndExtract -url $url -archiveName $archiveName -extractDir $tempExtractDir
-
-          # --- Logic to handle nested folders after extraction ---
-          $extractedItems = Get-ChildItem -Path $tempExtractDir -Force
-          if ($extractedItems.Count -eq 1 -and $extractedItems[0].PSIsContainer) {
-              $extractedFolder = $extractedItems[0]
-              echo "Single folder '$($extractedFolder.Name)' found in temp extraction path. Moving/Renaming to $finalExtractPath"
-              Move-Item -Path $extractedFolder.FullName -Destination $finalExtractPath -Force
-          } elseif ($extractedItems.Count -gt 0) {
-              echo "Multiple files/folders found in temp extraction path. Moving contents to $finalExtractPath"
-              if (-not (Test-Path $finalExtractPath)) { mkdir $finalExtractPath }
-              Move-Item -Path (Join-Path $tempExtractDir "*") -Destination $finalExtractPath -Force
+          # Verify extraction by checking if the directory exists
+          if (-not (Test-Path $extractPath)) {
+            echo "ERROR: Extraction failed or directory $extractPath not found for $pkgName"
+            exit 1
           } else {
-              echo "ERROR: No items found in $tempExtractDir after Get-AndExtract function for $pkgName."
-              Start-Sleep -Seconds 21600
+             echo "Successfully extracted $pkgName to $extractPath"
           }
-          # Clean up the temporary extraction parent directory
-          if (Test-Path $tempExtractDir) { Remove-Item $tempExtractDir -Recurse -Force }
-          # --- End folder handling logic ---
-
-          # Verify final extraction directory exists and is not empty
-          if (-not (Test-Path $finalExtractPath) -or (Get-ChildItem -Path $finalExtractPath -Force).Count -eq 0) {
-            echo "ERROR: Final directory $finalExtractPath verification failed for $pkgName."
-            Start-Sleep -Seconds 21600
-          } else {
-             echo "Successfully prepared $pkgName in $finalExtractPath"
-          }
-        } # End foreach package
+        }
 
     - name: Set up MSBuild and VS Environment
       uses: microsoft/setup-msbuild@v2 # Sets up MSBuild and VS dev environment
