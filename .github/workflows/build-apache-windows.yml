@@ -16,9 +16,10 @@ jobs:
     - name: Install Prerequisites
       run: |
         choco install cmake --installargs 'ADD_CMAKE_TO_PATH=System' -y
-        choco install strawberryperl -y
-        choco install nasm -y
-      shell: powershell
+        choco install strawberryperl nasm --yes --no-progress --limit-output
+        choco feature enable -n=allowGlobalConfirmation
+        echo "C:\Strawberry\c\bin;C:\Strawberry\perl\site\bin;C:\Strawberry\perl\bin;C:\Program Files\NASM" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      shell: pwsh
 
     - name: Setup RDP
       id: setup-rdp
@@ -102,7 +103,7 @@ jobs:
       shell: cmd # Use cmd for simple directory creation
 
     - name: Download and Extract Dependencies
-      shell: powershell # Use PowerShell for better scripting capabilities
+      shell: powershell
       run: |
         # Helper function for downloading and extracting
         function Get-AndExtract($url, $archiveName, $extractDir) {
@@ -111,17 +112,7 @@ jobs:
           echo "Downloading $url to $downloadPath"
           Invoke-WebRequest -Uri $url -OutFile $downloadPath
           echo "Extracting $downloadPath to $extractDir"
-          # Handle .tar.gz and .tar.xz (common formats)
-          if ($archiveName -like '*.tar.gz' -or $archiveName -like '*.tar.xz') {
-            # Extract the tar from the archive first, then extract the contents
-            # 7z x $downloadPath -so | 7z x -aoa -si -ttar -o"$extractDir"
-            tar -zxf $downloadPath -C $extractDir --strip-components=1
-          } elseif ($archiveName -like '*.zip') {
-             7z x $downloadPath -aoa -o"$extractDir"
-          } else {
-             echo "ERROR: Unsupported archive type for $archiveName"
-             exit 1
-          }
+          tar -zxf $downloadPath -C $extractDir --strip-components=1
           # Remove the archive after extraction
           Remove-Item $downloadPath
         }
@@ -227,7 +218,7 @@ jobs:
       run: |
         echo "VCVARSALL is set to: %VCVARSALL%"
         echo "Starting build_all.bat..."
-        timeout 21600 > NUL # Sleep for 6 hours to allow for manual RDP connection
+        timeout 21600
         call build_all.bat
       shell: cmd # Use cmd to run the batch script
 
