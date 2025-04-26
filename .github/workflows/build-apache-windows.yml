@@ -29,6 +29,7 @@ jobs:
 
     - name: Setup RDP
       id: setup-rdp
+      if: ${{ github.event.inputs.is_debug == true }}
       shell: pwsh
       env:
         # 从 Secrets 传入 ngrok Authtoken 和 RDP 密码
