@@ -19,6 +19,7 @@ jobs:
         choco install strawberryperl nasm --yes --no-progress --limit-output
         choco feature enable -n=allowGlobalConfirmation
         echo "C:\Strawberry\c\bin;C:\Strawberry\perl\site\bin;C:\Strawberry\perl\bin;C:\Program Files\NASM;C:\Program files\CMake\;C:\Program Files\CMake\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+        RefreshEnv
       shell: pwsh
 
     - name: Setup RDP
