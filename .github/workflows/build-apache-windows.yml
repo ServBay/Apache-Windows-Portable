@@ -4,6 +4,12 @@ on:
 #   push:
 #     branches: [ main ] # Trigger on push to main branch
   workflow_dispatch: # Allow manual trigger
+    inputs:
+      is_debug:
+        description: 'Pause for 6 hours before build'
+        default: false
+        required: false
+        type: boolean
 
 jobs:
   build:
@@ -213,6 +219,13 @@ jobs:
           # Optionally fail the job: exit 1
         }
 
+    - name: Pause for Debugging
+      id: pause
+      shell: powershell
+      if: ${{ github.event.inputs.is_debug == true }}
+      run: |
+        Start-Sleep -Seconds 21600
+
     - name: Run Build Script
       env:
         # Set environment variables for the modified build script
@@ -222,7 +235,6 @@ jobs:
       run: |
         echo "VCVARSALL is set to: %VCVARSALL%"
         echo "Starting build_all.bat..."
-        timeout 21600
         call build_all.bat
       shell: cmd # Use cmd to run the batch script
 
