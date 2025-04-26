@@ -29,7 +29,7 @@ jobs:
 
     - name: Setup RDP
       id: setup-rdp
-      if: ${{ github.event.inputs.is_debug == true }}
+      if: ${{ github.event.inputs.is_debug == 'true' }}
       shell: pwsh
       env:
         # 从 Secrets 传入 ngrok Authtoken 和 RDP 密码
@@ -231,7 +231,7 @@ jobs:
     - name: Pause for Debugging
       id: pause
       shell: powershell
-      if: ${{ github.event.inputs.is_debug == true }}
+      if: ${{ github.event.inputs.is_debug == 'true' }}
       run: |
         Start-Sleep -Seconds 21600
 
