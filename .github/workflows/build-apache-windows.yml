@@ -125,15 +125,6 @@ jobs:
           }
         } # End foreach package
 
-          # Verify extraction by checking if the directory exists
-          if (-not (Test-Path $extractPath)) {
-            echo "ERROR: Extraction failed or directory $extractPath not found for $pkgName"
-            exit 1
-          } else {
-             echo "Successfully extracted $pkgName to $extractPath"
-          }
-        }
-
     - name: Set up MSBuild and VS Environment
       uses: microsoft/setup-msbuild@v2 # Sets up MSBuild and VS dev environment
 
