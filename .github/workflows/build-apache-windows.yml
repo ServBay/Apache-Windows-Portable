@@ -79,36 +79,51 @@ jobs:
         foreach ($pkgName in $packages.Keys) {
           $url = $packages[$pkgName]
           $archiveName = $url.Split('/')[-1]
-          $extractPath = Join-Path $baseSrcPath $pkgName
+          # Target directory for extraction should be named exactly as $pkgName
+          $finalExtractPath = Join-Path $baseSrcPath $pkgName
 
+          # Use a temporary directory for the initial extraction to handle nested folders
           $tempExtractPath = Join-Path $baseSrcPath "$($pkgName)-temp-extract"
+          # Ensure the final path doesn't exist yet, or Get-AndExtract might extract into it directly if it's empty
+          if (Test-Path $finalExtractPath) { Remove-Item $finalExtractPath -Recurse -Force }
+          # Ensure temp path is clean before extraction
+          if (Test-Path $tempExtractPath) { Remove-Item $tempExtractPath -Recurse -Force }
+
+          # Call the updated extraction function
           Get-AndExtract -url $url -archiveName $archiveName -extractDir $tempExtractPath
-          # Find the actual extracted folder
-          $extractedFolder = Get-ChildItem -Path $tempExtractPath -Directory | Select-Object -First 1
-           if ($extractedFolder) {
-              # If the extracted folder name matches the pkgName, move its *contents*
-              if ($extractedFolder.Name -eq $pkgName) {
-                  echo "Moving contents of $($extractedFolder.FullName) to $extractPath"
-                  Move-Item -Path (Join-Path $extractedFolder.FullName "*") -Destination $extractPath -Force
-                  Remove-Item $extractedFolder.FullName -Recurse -Force
-              } else {
-                  # Otherwise, rename the folder
-                  echo "Renaming $($extractedFolder.FullName) to $extractPath"
-                  Move-Item -Path $extractedFolder.FullName -Destination $extractPath
-              }
-              Remove-Item $tempExtractPath -Recurse -Force
+
+          # --- Logic to handle nested folders after extraction ---
+          # Find the actual extracted content (could be a folder or files)
+          $extractedItems = Get-ChildItem -Path $tempExtractPath -Force
+          if ($extractedItems.Count -eq 1 -and $extractedItems[0].PSIsContainer) {
+              # Case 1: A single directory was extracted (e.g., package-version/)
+              $extractedFolder = $extractedItems[0]
+              echo "Single folder '$($extractedFolder.Name)' found in temp extraction path. Moving/Renaming to $finalExtractPath"
+              Move-Item -Path $extractedFolder.FullName -Destination $finalExtractPath -Force
+          } elseif ($extractedItems.Count -gt 0) {
+              # Case 2: Multiple files/folders extracted directly (less common for tarballs, but possible)
+              echo "Multiple files/folders found in temp extraction path. Moving contents to $finalExtractPath"
+              # Create the final directory first
+              if (-not (Test-Path $finalExtractPath)) { mkdir $finalExtractPath }
+              Move-Item -Path (Join-Path $tempExtractPath "*") -Destination $finalExtractPath -Force
           } else {
-               # Handle cases where extraction doesn't create a top-level directory (less common for tar.gz)
-               # Check if files were extracted directly into tempExtractPath
-               if ((Get-ChildItem -Path $tempExtractPath).Count -gt 0) {
-                  echo "Moving contents of $tempExtractPath to $extractPath"
-                  Move-Item -Path (Join-Path $tempExtractPath "*") -Destination $extractPath -Force
-                  Remove-Item $tempExtractPath -Recurse -Force
-               } else {
-                  echo "ERROR: Could not find extracted folder or files for $pkgName in $tempExtractPath"
-                  exit 1
-               }
+              # Case 3: Nothing found after extraction (Error should have been caught in Get-AndExtract, but double-check)
+              echo "ERROR: No items found in $tempExtractPath after extraction for $pkgName."
+              exit 1
           }
+          # Clean up the temporary extraction parent directory if it still exists
+          if (Test-Path $tempExtractPath) { Remove-Item $tempExtractPath -Recurse -Force }
+          # --- End folder handling logic ---
+
+
+          # Verify final extraction directory exists and is not empty
+          if (-not (Test-Path $finalExtractPath) -or (Get-ChildItem -Path $finalExtractPath -Force).Count -eq 0) {
+            echo "ERROR: Final directory $finalExtractPath not found or is empty for $pkgName after potential move/rename."
+            exit 1
+          } else {
+             echo "Successfully prepared $pkgName in $finalExtractPath"
+          }
+        } # End foreach package
 
           # Verify extraction by checking if the directory exists
           if (-not (Test-Path $extractPath)) {
