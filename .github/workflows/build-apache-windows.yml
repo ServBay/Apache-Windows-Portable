@@ -26,6 +26,83 @@ jobs:
         echo "C:\Program Files\7-Zip" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
       shell: powershell
 
+    - name: Setup RDP
+      id: setup-rdp
+      shell: pwsh
+      env:
+        # 从 Secrets 传入 ngrok Authtoken 和 RDP 密码
+        NGROK_AUTH_TOKEN: ${{ secrets.NGROK_AUTH_TOKEN }}
+        RDP_PASSWORD: ${{ secrets.RDP_PASSWORD }}
+      run: |
+        $ngrokLogFile = "$env:GITHUB_WORKSPACE\ngrok.log"
+        $ngrokProcess = $null
+        $rdpUser = "runneradmin"
+
+        # 检查 NGROK_AUTH_TOKEN 和 RDP_PASSWORD 是否设置
+        if ([string]::IsNullOrEmpty($env:NGROK_AUTH_TOKEN)) {
+          Write-Error "NGROK_AUTH_TOKEN secret is not set. Cannot start RDP session."
+          exit 1
+        }
+        if ([string]::IsNullOrEmpty($env:RDP_PASSWORD)) {
+          Write-Error "RDP_PASSWORD secret is not set. Cannot create RDP user."
+          exit 1
+        }
+
+        # --- 创建 RDP 用户并设置密码 ---
+        Write-Host "Setting RDP user '$rdpUser'..."
+        try {
+          Write-Host "Setting password for user '$rdpUser'..."
+          $securePassword = ConvertTo-SecureString -String $env:RDP_PASSWORD -AsPlainText -Force
+          try { Get-LocalUser -Name $rdpUser | Set-LocalUser -Password $securePassword -ErrorAction Stop; Write-Host "Password set via Set-LocalUser."}
+          catch { Write-Warning "Set-LocalUser failed: $($_.Exception.Message). Trying 'net user'..."; iex "net user $rdpUser '$($env:RDP_PASSWORD)'"; if ($LASTEXITCODE -ne 0) { throw "net user failed too."}; Write-Host "Password set via 'net user'." }
+        } catch {
+          Write-Error "Failed to configure RDP user '$rdpUser': $_"
+          if (Get-LocalUser -Name $rdpUser -ErrorAction SilentlyContinue) { Remove-LocalUser -Name $rdpUser -ErrorAction SilentlyContinue }
+          exit 1
+        }
+
+        Write-Host "Ensuring RDP is enabled..."
+        try {
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -name "fDenyTSConnections" -Value 0 -Force -ErrorAction Stop
+          Enable-NetFirewallRule -DisplayGroup "Remote Desktop" -ErrorAction Stop
+          Write-Host "RDP enabled and firewall rule checked."
+        } catch { Write-Warning "Failed to explicitly enable RDP or firewall rule: $_. Assuming it's already configured." }
+
+        Write-Host "Setting up ngrok..."
+        try { choco install ngrok -y --force --no-progress --ignore-checksums }
+        catch {
+          Write-Warning "Chocolatey install failed or choco not found. Attempting manual download..."
+          $ngrokZip = "$env:TEMP\ngrok.zip"; $ngrokExe = "$env:TEMP\ngrok.exe"
+          Invoke-WebRequest "https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-windows-amd64.zip" -OutFile $ngrokZip
+          Expand-Archive $ngrokZip -DestinationPath $env:TEMP -Force
+          Move-Item "$env:TEMP\ngrok.exe" $ngrokExe -Force
+          Remove-Item $ngrokZip -Force
+          $env:PATH += ";$env:TEMP"
+        }
+        if (-not (Get-Command ngrok -ErrorAction SilentlyContinue)) { Write-Error "ngrok command not found after installation attempts."; Remove-LocalUser -Name $rdpUser -ErrorAction SilentlyContinue; exit 1 }
+        Write-Host "Configuring ngrok authtoken..."
+        ngrok config add-authtoken $env:NGROK_AUTH_TOKEN --log=stdout
+
+        Write-Host "Starting ngrok RDP tunnel (TCP port 3389)..."
+        $ngrokArgs = "tcp 3389 --log `"$ngrokLogFile`""
+        try {
+          $ngrokProcess = Start-Process ngrok -ArgumentList $ngrokArgs -WindowStyle Hidden -PassThru -ErrorAction Stop
+          Write-Host "ngrok process started (PID: $($ngrokProcess.Id)). Waiting for tunnel info..."
+          Start-Sleep -Seconds 15
+          $rdpUrl = $null; $maxAttempts = 5; $attempt = 0
+          while ($attempt -lt $maxAttempts -and -not $rdpUrl) {
+              $attempt++; if (Test-Path $ngrokLogFile) { $logContent = Get-Content $ngrokLogFile -Raw -ErrorAction SilentlyContinue; $match = $logContent | Select-String -Pattern 'url=(tcp://[^ ]+)'; if ($match) { $rdpUrl = $match.Matches[0].Groups[1].Value; Write-Host "RDP Connection URL found: $rdpUrl"; break } }
+              Write-Host "Waiting for ngrok URL in log... (Attempt $attempt/$maxAttempts)"; Start-Sleep -Seconds 5
+          }
+          if (-not $rdpUrl) { Write-Error "Failed to retrieve RDP connection URL from ngrok log ($ngrokLogFile) after $maxAttempts attempts."; if ($ngrokProcess) { Stop-Process -Id $ngrokProcess.Id -Force -ErrorAction SilentlyContinue }; Remove-LocalUser -Name $rdpUser -ErrorAction SilentlyContinue; exit 1 }
+          Write-Host "----------------------------------------------------------------------"
+          Write-Host "ACTION REQUIRED: Manual installation needed via RDP."
+          Write-Host "Connect using an RDP client to: $rdpUrl"
+          Write-Host "Username: $rdpUser"
+          Write-Host "Password: Use the value from your RDP_PASSWORD secret."
+          Write-Host "----------------------------------------------------------------------"
+        } catch { Write-Error "Failed to start ngrok process: $_"; if ($ngrokProcess) { Stop-Process -Id $ngrokProcess.Id -Force -ErrorAction SilentlyContinue }; Remove-LocalUser -Name $rdpUser -ErrorAction SilentlyContinue; exit 1 }
+
     - name: Create Source Directory
       run: mkdir src
       shell: cmd # Use cmd for simple directory creation
@@ -79,46 +156,37 @@ jobs:
         foreach ($pkgName in $packages.Keys) {
           $url = $packages[$pkgName]
           $archiveName = $url.Split('/')[-1]
-          # Target directory for extraction should be named exactly as $pkgName
-          $finalExtractPath = Join-Path $baseSrcPath $pkgName
+          $finalExtractPath = Join-Path $baseSrcPath $pkgName # Final destination
 
-          # Use a temporary directory for the initial extraction to handle nested folders
-          $tempExtractPath = Join-Path $baseSrcPath "$($pkgName)-temp-extract"
-          # Ensure the final path doesn't exist yet, or Get-AndExtract might extract into it directly if it's empty
+          # Use a temporary directory for the initial extraction output
+          $tempExtractDir = Join-Path $baseSrcPath "$($pkgName)-temp-extract"
           if (Test-Path $finalExtractPath) { Remove-Item $finalExtractPath -Recurse -Force }
-          # Ensure temp path is clean before extraction
-          if (Test-Path $tempExtractPath) { Remove-Item $tempExtractPath -Recurse -Force }
+          if (Test-Path $tempExtractDir) { Remove-Item $tempExtractDir -Recurse -Force }
 
-          # Call the updated extraction function
-          Get-AndExtract -url $url -archiveName $archiveName -extractDir $tempExtractPath
+          # Call the updated extraction function, extracting *into* tempExtractDir
+          Get-AndExtract -url $url -archiveName $archiveName -extractDir $tempExtractDir
 
           # --- Logic to handle nested folders after extraction ---
-          # Find the actual extracted content (could be a folder or files)
-          $extractedItems = Get-ChildItem -Path $tempExtractPath -Force
+          $extractedItems = Get-ChildItem -Path $tempExtractDir -Force
           if ($extractedItems.Count -eq 1 -and $extractedItems[0].PSIsContainer) {
-              # Case 1: A single directory was extracted (e.g., package-version/)
               $extractedFolder = $extractedItems[0]
               echo "Single folder '$($extractedFolder.Name)' found in temp extraction path. Moving/Renaming to $finalExtractPath"
               Move-Item -Path $extractedFolder.FullName -Destination $finalExtractPath -Force
           } elseif ($extractedItems.Count -gt 0) {
-              # Case 2: Multiple files/folders extracted directly (less common for tarballs, but possible)
               echo "Multiple files/folders found in temp extraction path. Moving contents to $finalExtractPath"
-              # Create the final directory first
               if (-not (Test-Path $finalExtractPath)) { mkdir $finalExtractPath }
-              Move-Item -Path (Join-Path $tempExtractPath "*") -Destination $finalExtractPath -Force
+              Move-Item -Path (Join-Path $tempExtractDir "*") -Destination $finalExtractPath -Force
           } else {
-              # Case 3: Nothing found after extraction (Error should have been caught in Get-AndExtract, but double-check)
-              echo "ERROR: No items found in $tempExtractPath after extraction for $pkgName."
+              echo "ERROR: No items found in $tempExtractDir after Get-AndExtract function for $pkgName."
               exit 1
           }
-          # Clean up the temporary extraction parent directory if it still exists
-          if (Test-Path $tempExtractPath) { Remove-Item $tempExtractPath -Recurse -Force }
+          # Clean up the temporary extraction parent directory
+          if (Test-Path $tempExtractDir) { Remove-Item $tempExtractDir -Recurse -Force }
           # --- End folder handling logic ---
-
 
           # Verify final extraction directory exists and is not empty
           if (-not (Test-Path $finalExtractPath) -or (Get-ChildItem -Path $finalExtractPath -Force).Count -eq 0) {
-            echo "ERROR: Final directory $finalExtractPath not found or is empty for $pkgName after potential move/rename."
+            echo "ERROR: Final directory $finalExtractPath verification failed for $pkgName."
             exit 1
           } else {
              echo "Successfully prepared $pkgName in $finalExtractPath"
