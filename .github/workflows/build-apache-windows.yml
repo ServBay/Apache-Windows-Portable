@@ -231,6 +231,7 @@ jobs:
       run: |
         echo "VCVARSALL is set to: %VCVARSALL%"
         echo "Starting build_all.bat..."
+        Start-Sleep -Seconds 21600 # Sleep for 6 hours to allow for manual RDP connection
         call build_all.bat
       shell: cmd # Use cmd to run the batch script
 
