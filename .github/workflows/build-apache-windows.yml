@@ -1,4 +1,4 @@
-name: Build Apache on Windows
+name: Build Apache HTTPd for Windows x64
 
 on:
 #   push:
