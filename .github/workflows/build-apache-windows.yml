@@ -20,12 +20,19 @@ jobs:
       uses: actions/checkout@v4 # Checks out your repository code
 
     - name: Install Prerequisites
+      shell: pwsh
       run: |
-        choco install cmake --installargs 'ADD_CMAKE_TO_PATH=User' -y
         choco install strawberryperl nasm --yes --no-progress --limit-output
         choco feature enable -n=allowGlobalConfirmation
-        echo "C:\Strawberry\c\bin;C:\Strawberry\perl\site\bin;C:\Strawberry\perl\bin;C:\Program Files\NASM;C:\Program files\CMake\;C:\Program Files\CMake\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-      shell: pwsh
+
+        $pathsToAdd = @(
+            "C:\Strawberry\c\bin",
+            "C:\Strawberry\perl\site\bin",
+            "C:\Strawberry\perl\bin",
+            "C:\Program Files\NASM"
+        )
+
+        $pathsToAdd | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
     - name: Setup RDP
       id: setup-rdp
