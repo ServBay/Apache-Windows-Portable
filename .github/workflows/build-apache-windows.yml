@@ -5,6 +5,10 @@ on:
 #     branches: [ main ] # Trigger on push to main branch
   workflow_dispatch: # Allow manual trigger
     inputs:
+      apache_version:
+        description: 'Apache version tag to build (e.g., 2.4.63). The workflow will checkout tag apache-<version>.'
+        required: true
+        type: string
       is_debug:
         description: 'Pause for 6 hours before build'
         default: false
@@ -153,7 +157,7 @@ jobs:
           "apr-util-1.6.3"      = "https://dlcdn.apache.org/apr/apr-util-1.6.3.tar.gz"
           "nghttp2-1.65.0"      = "https://github.com/nghttp2/nghttp2/releases/download/v1.65.0/nghttp2-1.65.0.tar.gz"
           "curl-8.13.0"         = "https://curl.se/download/curl-8.13.0.tar.gz"
-          "httpd-2.4.63"        = "https://dlcdn.apache.org/httpd/httpd-2.4.63.tar.gz"
+          "httpd-${{ github.event.inputs.apache_version }}"        = "https://dlcdn.apache.org/httpd/httpd-${{ github.event.inputs.apache_version }}.tar.gz"
           "mod_fcgid-2.3.9"     = "https://dlcdn.apache.org/httpd/mod_fcgid/mod_fcgid-2.3.9.tar.gz"
         }
 
@@ -247,6 +251,7 @@ jobs:
         # Set environment variables for the modified build script
         BUILD_BASE_ENV: ${{ github.workspace }}\build
         PREFIX_ENV: C:\ServBay\packages\apache
+        APACHE_VERSION: ${{ github.event.inputs.apache_version }}
         # VCVARSALL should be implicitly set by setup-msbuild, but double-check if issues arise
       run: |
         echo "VCVARSALL is set to: %VCVARSALL%"
@@ -254,9 +259,22 @@ jobs:
         call build_all.bat
       shell: cmd # Use cmd to run the batch script
 
-    - name: Upload Build Artifact
-      uses: actions/upload-artifact@v4
+    - name: Create ZIP package # 打包编译结果
+      shell: pwsh
+      run: |
+        $zipFileName = "apache-${{ github.event.inputs.apache_version }}-win-x64.zip"
+        Compress-Archive -Path C:\ServBay\packages\apache\* -DestinationPath ${{ env.GITHUB_WORKSPACE }}/$zipFileName
+        echo "ZIP_FILE_NAME=$zipFileName" >> $env:GITHUB_ENV
+        echo "ZIP_FILE_PATH=${{ env.GITHUB_WORKSPACE }}/$zipFileName" >> $env:GITHUB_ENV
+
+    - name: Create GitHub Release # 创建 GitHub Release 并上传 ZIP 文件
+      uses: softprops/action-gh-release@v2 # 使用社区流行的 Release Action
       with:
-        name: apache-windows-build # Name of the artifact zip file
-        path: C:\ServBay\packages\apache # Path to the directory to upload
-        if-no-files-found: error # Fail the step if the directory is empty or not found
+        tag_name: apache-${{ github.event.inputs.apache_version }}-win-x64 # Release 的 tag 名称
+        name: Apache ${{ github.event.inputs.apache_version }} for Windows x64 # Release 的标题
+        body: | # Release 的描述
+          Compiled Apache ${{ github.event.inputs.apache_version }} for Windows x64 (VC-WIN64A).
+        files: ${{ env.ZIP_FILE_PATH }} # 需要上传的文件路径
+        fail_on_unmatched_files: true # 如果找不到文件则失败
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # 使用 GitHub 自动提供的 Token

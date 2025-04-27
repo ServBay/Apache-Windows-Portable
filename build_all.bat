@@ -57,6 +57,12 @@ setlocal ENABLEEXTENSIONS ENABLEDELAYEDEXPANSION
 
 rem --- GitHub Actions Integration ---
 rem Use environment variables if set, otherwise use defaults.
+if defined APACHE_VERSION (
+  set "HTTPD=httpd-%APACHE_VERSION%"
+) else (
+  echo WARN: APACHE_VERSION not set, using default C:\Development\Apache24\build
+  set "HTTPD=httpd-2.4.63"
+)
 if defined BUILD_BASE_ENV (
   set BUILD_BASE=%BUILD_BASE_ENV%
 ) else (
@@ -110,7 +116,6 @@ set APR-ICONV=apr-iconv-1.2.2
 set APR-UTIL=apr-util-1.6.3
 set NGHTTP2=nghttp2-1.65.0
 set CURL=curl-8.13.0
-set HTTPD=httpd-2.4.63
 set MOD_FCGID=mod_fcgid-2.3.9
 
 rem Use OpenSSL with CURL - ON or OFF.
@@ -551,7 +556,7 @@ if !STATUS! == 0 (
     s~(_files_per_batch[\s]+^)200(\^)^)~${1}100${2}~m; ^
     ^" docs\libcurl\CMakeLists.txt
 
-  set CURL_CMAKE_OPTS=-DCMAKE_INSTALL_PREFIX=%PREFIX% -DCMAKE_BUILD_TYPE=%BUILD_TYPE% -DCURL_USE_OPENSSL=%CURL_USE_OPENSSL% -DOPENSSL_ROOT_DIR=%PREFIX% -DCURL_USE_SCHANNEL=ON -DCURL_WINDOWS_SSPI=ON -DCURL_BROTLI=ON -DUSE_NGHTTP2=ON -DHAVE_LDAP_SSL=ON -DENABLE_UNICODE=ON -DCURL_STATIC_CRT=OFF -DUSE_WIN32_CRYPTO=ON -DUSE_LIBIDN2=OFF -DCURL_USE_LIBPSL=OFF -DCURL_USE_LIBSSH2=OFF
+  set CURL_CMAKE_OPTS=-DCMAKE_INSTALL_PREFIX=%PREFIX% -DCMAKE_BUILD_TYPE=%BUILD_TYPE% -DCURL_USE_OPENSSL=%CURL_USE_OPENSSL% -DOPENSSL_ROOT_DIR=%PREFIX% -DCURL_CA_BUNDLE=../../ssl/cert.pem -DCURL_CA_PATH=../../ssl/certs -DCURL_USE_SCHANNEL=ON -DCURL_WINDOWS_SSPI=ON -DCURL_BROTLI=ON -DUSE_NGHTTP2=ON -DHAVE_LDAP_SSL=ON -DENABLE_UNICODE=ON -DCURL_STATIC_CRT=OFF -DUSE_WIN32_CRYPTO=ON -DUSE_LIBIDN2=OFF -DCURL_USE_LIBPSL=OFF -DCURL_USE_LIBSSH2=OFF
 
   call :build_package %CURL% "!CURL_CMAKE_OPTS! -DBUILD_SHARED_LIBS=ON" & if not !STATUS! == 0 exit /b !STATUS!
   call :build_package %CURL% "!CURL_CMAKE_OPTS! -DBUILD_SHARED_LIBS=OFF" & if not !STATUS! == 0 exit /b !STATUS!
@@ -591,7 +596,7 @@ if !STATUS! == 0 (
       ^" modules\mappers\mod_rewrite.c
   )
 
-  set HTTPD_CMAKE_OPTS=-DCMAKE_INSTALL_PREFIX=%PREFIX% -DCMAKE_BUILD_TYPE=%BUILD_TYPE% -DENABLE_MODULES=i -DINSTALL_PDB=%INSTALL_PDB% -DOPENSSL_ROOT_DIR=%PREFIX%
+  set HTTPD_CMAKE_OPTS=-DCMAKE_INSTALL_PREFIX=%PREFIX% -DCMAKE_BUILD_TYPE=%BUILD_TYPE% -DENABLE_MODULES=i -DINSTALL_PDB=%INSTALL_PDB% -DOPENSSL_ROOT_DIR=%PREFIX% -DDEFAULT_PIDLOG="../../logs/httpd.pid" -DDEFAULT_SCOREBOARD="../../logs/apache_runtime_status" -DDEFAULT_ERRORLOG="../../logs/apache/error.log" -DAP_TYPES_CONFIG_FILE="../../etc/apache/mime.types" -DSERVER_CONFIG_FILE="../../etc/apache/httpd.conf"
   call :build_package %HTTPD% "!HTTPD_CMAKE_OPTS!" & if not !STATUS! == 0 exit /b !STATUS!
 
   rem Install additional support scripts.
