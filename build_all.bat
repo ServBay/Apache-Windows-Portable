@@ -75,6 +75,7 @@ if defined PREFIX_ENV (
   echo WARN: PREFIX_ENV not set, using default C:\ServBay\packages\apache
   set PREFIX=C:\ServBay\packages\apache
 )
+echo Apache Version to build: %HTTPD%
 echo Using BUILD_BASE: %BUILD_BASE%
 echo Using PREFIX: %PREFIX%
 rem --- End GitHub Actions Integration ---
@@ -596,7 +597,7 @@ if !STATUS! == 0 (
       ^" modules\mappers\mod_rewrite.c
   )
 
-  set HTTPD_CMAKE_OPTS=-DCMAKE_INSTALL_PREFIX=%PREFIX% -DCMAKE_BUILD_TYPE=%BUILD_TYPE% -DENABLE_MODULES=i -DINSTALL_PDB=%INSTALL_PDB% -DOPENSSL_ROOT_DIR=%PREFIX% -DDEFAULT_PIDLOG="../../logs/httpd.pid" -DDEFAULT_SCOREBOARD="../../logs/apache_runtime_status" -DDEFAULT_ERRORLOG="../../logs/apache/error.log" -DAP_TYPES_CONFIG_FILE="../../etc/apache/mime.types" -DSERVER_CONFIG_FILE="../../etc/apache/httpd.conf"
+  set HTTPD_CMAKE_OPTS=-DCMAKE_INSTALL_PREFIX=%PREFIX% -DCMAKE_BUILD_TYPE=%BUILD_TYPE% -DENABLE_MODULES=i -DINSTALL_PDB=%INSTALL_PDB% -DINSTALL_MANUAL=OFF -DOPENSSL_ROOT_DIR=%PREFIX% -DDEFAULT_PIDLOG="../../logs/httpd.pid" -DDEFAULT_SCOREBOARD="../../logs/apache_runtime_status" -DDEFAULT_ERRORLOG="../../logs/apache/error.log" -DAP_TYPES_CONFIG_FILE="../../etc/apache/mime.types" -DSERVER_CONFIG_FILE="../../etc/apache/httpd.conf"
   call :build_package %HTTPD% "!HTTPD_CMAKE_OPTS!" & if not !STATUS! == 0 exit /b !STATUS!
 
   rem Install additional support scripts.

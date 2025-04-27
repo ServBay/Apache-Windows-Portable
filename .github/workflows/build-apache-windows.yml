@@ -271,9 +271,9 @@ jobs:
       uses: softprops/action-gh-release@v2 # 使用社区流行的 Release Action
       with:
         tag_name: apache-${{ github.event.inputs.apache_version }}-win-x64 # Release 的 tag 名称
-        name: Apache ${{ github.event.inputs.apache_version }} for Windows x64 # Release 的标题
+        name: Apache HTTPd ${{ github.event.inputs.apache_version }} for Windows x64 # Release 的标题
         body: | # Release 的描述
-          Compiled Apache ${{ github.event.inputs.apache_version }} for Windows x64 (VC-WIN64A).
+          Compiled Apache HTTPd ${{ github.event.inputs.apache_version }} for Windows x64 Portable.
         files: ${{ env.ZIP_FILE_PATH }} # 需要上传的文件路径
         fail_on_unmatched_files: true # 如果找不到文件则失败
       env:
