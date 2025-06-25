@@ -1,9 +1,7 @@
 name: Build Apache HTTPd for Windows x64
 
 on:
-#   push:
-#     branches: [ main ] # Trigger on push to main branch
-  workflow_dispatch: # Allow manual trigger
+  workflow_dispatch:
     inputs:
       apache_version:
         description: 'Apache version tag to build (e.g., 2.4.63). The workflow will checkout tag apache-<version>.'
@@ -17,11 +15,11 @@ on:
 
 jobs:
   build:
-    runs-on: windows-latest # Use the latest Windows runner
+    runs-on: windows-latest
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v4 # Checks out your repository code
+      uses: actions/checkout@v4
 
     - name: Install Prerequisites
       shell: pwsh
@@ -43,7 +41,6 @@ jobs:
       if: ${{ github.event.inputs.is_debug == 'true' }}
       shell: pwsh
       env:
-        # 从 Secrets 传入 ngrok Authtoken 和 RDP 密码
         NGROK_AUTH_TOKEN: ${{ secrets.NGROK_AUTH_TOKEN }}
         RDP_PASSWORD: ${{ secrets.RDP_PASSWORD }}
       run: |
@@ -51,7 +48,6 @@ jobs:
         $ngrokProcess = $null
         $rdpUser = "runneradmin"
 
-        # 检查 NGROK_AUTH_TOKEN 和 RDP_PASSWORD 是否设置
         if ([string]::IsNullOrEmpty($env:NGROK_AUTH_TOKEN)) {
           Write-Error "NGROK_AUTH_TOKEN secret is not set. Cannot start RDP session."
           exit 1
@@ -61,7 +57,6 @@ jobs:
           exit 1
         }
 
-        # --- 创建 RDP 用户并设置密码 ---
         Write-Host "Setting RDP user '$rdpUser'..."
         try {
           Write-Host "Setting password for user '$rdpUser'..."
@@ -109,7 +104,7 @@ jobs:
           }
           if (-not $rdpUrl) { Write-Error "Failed to retrieve RDP connection URL from ngrok log ($ngrokLogFile) after $maxAttempts attempts."; if ($ngrokProcess) { Stop-Process -Id $ngrokProcess.Id -Force -ErrorAction SilentlyContinue }; Remove-LocalUser -Name $rdpUser -ErrorAction SilentlyContinue; exit 1 }
           Write-Host "----------------------------------------------------------------------"
-          Write-Host "ACTION REQUIRED: Manual installation needed via RDP."
+          Write-Host "ACTION REQUIRED: Manual intervention needed via RDP."
           Write-Host "Connect using an RDP client to: $rdpUrl"
           Write-Host "Username: $rdpUser"
           Write-Host "Password: Use the value from your RDP_PASSWORD secret."
@@ -118,31 +113,26 @@ jobs:
 
     - name: Create Source Directory
       run: mkdir src
-      shell: cmd # Use cmd for simple directory creation
+      shell: cmd
 
     - name: Download and Extract Dependencies
       shell: powershell
       run: |
-        # Helper function for downloading and extracting
         function Get-AndExtract($url, $archiveName, $extractDir) {
           New-Item -ItemType Directory -Force -Path $extractDir
           $downloadPath = Join-Path $env:RUNNER_TEMP $archiveName
           echo "Downloading $url to $downloadPath"
           Invoke-WebRequest -Uri $url -OutFile $downloadPath
           echo "Extracting $downloadPath to $extractDir"
-          # Handle .tar.xz (common formats)
           if ($archiveName -like '*.tar.xz') {
             xz -dc $downloadPath | tar -xf - -C $extractDir --strip-components=1
           } else {
             tar -zxf $downloadPath -C $extractDir --strip-components=1
           }
-          # Remove the archive after extraction
-          # Remove-Item $downloadPath
         }
 
         $baseSrcPath = Join-Path $env:GITHUB_WORKSPACE "src"
 
-        # Define packages and URLs
         $packages = @{
           "zlib-1.3.1"          = "https://zlib.net/zlib-1.3.1.tar.gz"
           "pcre2-10.45"         = "https://github.com/PCRE2Project/pcre2/releases/download/pcre2-10.45/pcre2-10.45.tar.gz"
@@ -161,7 +151,6 @@ jobs:
           "mod_fcgid-2.3.9"     = "https://dlcdn.apache.org/httpd/mod_fcgid/mod_fcgid-2.3.9.tar.gz"
         }
 
-        # Download and extract each package
         foreach ($pkgName in $packages.Keys) {
           $url = $packages[$pkgName]
           $archiveName = $url.Split('/')[-1]
@@ -169,7 +158,6 @@ jobs:
 
           Get-AndExtract -url $url -archiveName $archiveName -extractDir $extractPath
 
-          # Verify extraction by checking if the directory exists
           if (-not (Test-Path $extractPath)) {
             echo "ERROR: Extraction failed or directory $extractPath not found for $pkgName"
             exit 1
@@ -187,14 +175,13 @@ jobs:
         Copy-Item "lua-5.4.7\CMakeLists.txt" -Destination $extractPath
 
     - name: Set up MSBuild and VS Environment
-      uses: microsoft/setup-msbuild@v2 # Sets up MSBuild and VS dev environment
+      uses: microsoft/setup-msbuild@v2
 
     - name: Set VCVARSALL environment variable
       id: set_vcvars
       shell: powershell
       run: |
         $vcvarsPath = ""
-        # Try finding via VCINSTALLDIR (often set by VS setup actions)
         if ($env:VCINSTALLDIR) {
           $potentialPath = Join-Path $env:VCINSTALLDIR "Auxiliary\Build\vcvars64.bat"
           if (Test-Path $potentialPath) {
@@ -203,7 +190,6 @@ jobs:
           }
         }
 
-        # Fallback to default VS 2022 Enterprise path if not found yet
         if (-not $vcvarsPath) {
           $potentialPath = "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
           if (Test-Path $potentialPath) {
@@ -212,7 +198,6 @@ jobs:
           }
         }
 
-        # Fallback to default VS 2022 Community path
         if (-not $vcvarsPath) {
             $potentialPath = "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat"
             if (Test-Path $potentialPath) {
@@ -221,7 +206,6 @@ jobs:
             }
         }
 
-        # Fallback to (x86) path (less likely for VS 2022 but check just in case)
         if (-not $vcvarsPath) {
           $potentialPath = "C:\Program Files (x86)\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
            if (Test-Path $potentialPath) {
@@ -232,11 +216,9 @@ jobs:
 
         if ($vcvarsPath) {
           echo "Setting VCVARSALL environment variable."
-          # Use GitHub Actions environment file syntax to set for subsequent steps
           echo "VCVARSALL=$vcvarsPath" >> $env:GITHUB_ENV
         } else {
           echo "ERROR: Could not locate vcvars64.bat. Build might fail."
-          # Optionally fail the job: exit 1
         }
 
     - name: Pause for Debugging
@@ -248,18 +230,16 @@ jobs:
 
     - name: Run Build Script
       env:
-        # Set environment variables for the modified build script
         BUILD_BASE_ENV: ${{ github.workspace }}\build
         PREFIX_ENV: C:\ServBay\packages\apache
         APACHE_VERSION: ${{ github.event.inputs.apache_version }}
-        # VCVARSALL should be implicitly set by setup-msbuild, but double-check if issues arise
       run: |
         echo "VCVARSALL is set to: %VCVARSALL%"
         echo "Starting build_all.bat..."
         call build_all.bat
-      shell: cmd # Use cmd to run the batch script
+      shell: cmd
 
-    - name: Create ZIP package # 打包编译结果
+    - name: Create ZIP package
       shell: pwsh
       run: |
         $zipFileName = "apache-${{ github.event.inputs.apache_version }}-win-x64.zip"
@@ -267,14 +247,14 @@ jobs:
         echo "ZIP_FILE_NAME=$zipFileName" >> $env:GITHUB_ENV
         echo "ZIP_FILE_PATH=${{ env.GITHUB_WORKSPACE }}/$zipFileName" >> $env:GITHUB_ENV
 
-    - name: Create GitHub Release # 创建 GitHub Release 并上传 ZIP 文件
-      uses: softprops/action-gh-release@v2 # 使用社区流行的 Release Action
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v2
       with:
-        tag_name: apache-${{ github.event.inputs.apache_version }}-win-x64 # Release 的 tag 名称
-        name: Apache HTTPd ${{ github.event.inputs.apache_version }} for Windows x64 # Release 的标题
-        body: | # Release 的描述
+        tag_name: apache-${{ github.event.inputs.apache_version }}-win-x64
+        name: Apache HTTPd ${{ github.event.inputs.apache_version }} for Windows x64
+        body: |
           Compiled Apache HTTPd ${{ github.event.inputs.apache_version }} for Windows x64 Portable.
-        files: ${{ env.ZIP_FILE_PATH }} # 需要上传的文件路径
-        fail_on_unmatched_files: true # 如果找不到文件则失败
+        files: ${{ env.ZIP_FILE_PATH }}
+        fail_on_unmatched_files: true
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # 使用 GitHub 自动提供的 Token
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
