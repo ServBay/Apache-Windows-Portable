@@ -190,6 +190,22 @@ jobs:
           }
         }
 
+        # vswhere is the version-agnostic way to locate VS; the hardcoded edition
+        # paths below break whenever the runner image bumps the VS version.
+        if (-not $vcvarsPath) {
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          if (Test-Path $vswhere) {
+            $vsInstall = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+            if ($vsInstall) {
+              $potentialPath = Join-Path $vsInstall "VC\Auxiliary\Build\vcvars64.bat"
+              if (Test-Path $potentialPath) {
+                $vcvarsPath = $potentialPath
+                echo "Found vcvarsall.bat via vswhere: $vcvarsPath"
+              }
+            }
+          }
+        }
+
         if (-not $vcvarsPath) {
           $potentialPath = "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
           if (Test-Path $potentialPath) {
