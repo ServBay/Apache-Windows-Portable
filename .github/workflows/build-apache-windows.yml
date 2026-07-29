@@ -32,8 +32,15 @@ jobs:
         choco install strawberryperl nasm --yes --no-progress --limit-output
         choco feature enable -n=allowGlobalConfirmation
 
+        # Strawberry Perl also ships a MinGW C toolchain and third-party import
+        # libraries. Keep Perl available, but never expose that C toolchain to
+        # CMake or MSVC dependency discovery.
+        $cleanPath = ($env:PATH -split ";" | Where-Object {
+            $_ -and $_ -notmatch '^C:\\Strawberry\\c(?:\\|$)'
+        }) -join ";"
+        "PATH=$cleanPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
         $pathsToAdd = @(
-            "C:\Strawberry\c\bin",
             "C:\Strawberry\perl\site\bin",
             "C:\Strawberry\perl\bin",
             "C:\Program Files\NASM"

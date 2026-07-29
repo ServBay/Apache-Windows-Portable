@@ -78,6 +78,8 @@ if defined PREFIX_ENV (
 echo Apache Version to build: %HTTPD%
 echo Using BUILD_BASE: %BUILD_BASE%
 echo Using PREFIX: %PREFIX%
+set "SCRIPT_DIR=%~dp0"
+set SERVBAY_CMAKE_FIND_OPTS=-DCMAKE_PREFIX_PATH=%PREFIX% -DCMAKE_IGNORE_PREFIX_PATH=C:/Strawberry/c -DCMAKE_FIND_USE_PACKAGE_REGISTRY=OFF -DCMAKE_FIND_USE_SYSTEM_PACKAGE_REGISTRY=OFF
 rem --- End GitHub Actions Integration ---
 
 
@@ -271,7 +273,7 @@ rem
 call :check_package_source %LIBXML2%
 
 if !STATUS! == 0 (
-  set LIBXML2_CMAKE_OPTS=-DCMAKE_INSTALL_PREFIX=%PREFIX% -DCMAKE_BUILD_TYPE=%BUILD_TYPE% -DBUILD_SHARED_LIBS=ON -DLIBXML2_WITH_ICONV=OFF -DLIBXML2_WITH_PYTHON=OFF -DLIBXML2_WITH_ZLIB=ON
+  set LIBXML2_CMAKE_OPTS=-DCMAKE_INSTALL_PREFIX=%PREFIX% -DCMAKE_BUILD_TYPE=%BUILD_TYPE% -DBUILD_SHARED_LIBS=ON -DLIBXML2_WITH_ICONV=OFF -DLIBXML2_WITH_PYTHON=OFF -DLIBXML2_WITH_ZLIB=ON -DZLIB_ROOT=%PREFIX% -DZLIB_INCLUDE_DIR=%PREFIX%/include -DZLIB_LIBRARY=%PREFIX%/lib/zlib.lib
   call :build_package %LIBXML2% "!LIBXML2_CMAKE_OPTS!" & if not !STATUS! == 0 exit /b !STATUS!
 )
 
@@ -559,7 +561,7 @@ if !STATUS! == 0 (
     s~(_files_per_batch[\s]+^)200(\^)^)~${1}100${2}~m; ^
     ^" docs\libcurl\CMakeLists.txt
 
-  set CURL_CMAKE_OPTS=-DCMAKE_INSTALL_PREFIX=%PREFIX% -DCMAKE_BUILD_TYPE=%BUILD_TYPE% -DCURL_USE_OPENSSL=%CURL_USE_OPENSSL% -DOPENSSL_ROOT_DIR=%PREFIX% -DCURL_CA_BUNDLE=../../ssl/cert.pem -DCURL_CA_PATH=../../ssl/certs -DCURL_USE_SCHANNEL=ON -DCURL_WINDOWS_SSPI=ON -DCURL_BROTLI=ON -DUSE_NGHTTP2=ON -DHAVE_LDAP_SSL=ON -DENABLE_UNICODE=ON -DCURL_STATIC_CRT=OFF -DUSE_WIN32_CRYPTO=ON -DUSE_LIBIDN2=OFF -DCURL_USE_LIBPSL=OFF -DCURL_USE_LIBSSH2=OFF
+  set CURL_CMAKE_OPTS=-DCMAKE_INSTALL_PREFIX=%PREFIX% -DCMAKE_BUILD_TYPE=%BUILD_TYPE% -DCURL_USE_OPENSSL=%CURL_USE_OPENSSL% -DOPENSSL_ROOT_DIR=%PREFIX% -DCURL_CA_BUNDLE=../../ssl/cert.pem -DCURL_CA_PATH=../../ssl/certs -DCURL_USE_SCHANNEL=ON -DCURL_WINDOWS_SSPI=ON -DCURL_BROTLI=ON -DUSE_NGHTTP2=ON -DHAVE_LDAP_SSL=ON -DENABLE_UNICODE=ON -DCURL_STATIC_CRT=OFF -DUSE_WIN32_CRYPTO=ON -DUSE_LIBIDN2=OFF -DCURL_USE_LIBPSL=OFF -DCURL_USE_LIBSSH2=OFF -DZLIB_ROOT=%PREFIX% -DZLIB_INCLUDE_DIR=%PREFIX%/include -DZLIB_LIBRARY=%PREFIX%/lib/zlib.lib
 
   call :build_package %CURL% "!CURL_CMAKE_OPTS! -DBUILD_SHARED_LIBS=ON" & if not !STATUS! == 0 exit /b !STATUS!
   call :build_package %CURL% "!CURL_CMAKE_OPTS! -DBUILD_SHARED_LIBS=OFF" & if not !STATUS! == 0 exit /b !STATUS!
@@ -599,7 +601,7 @@ if !STATUS! == 0 (
       ^" modules\mappers\mod_rewrite.c
   )
 
-  set HTTPD_CMAKE_OPTS=-DCMAKE_INSTALL_PREFIX=%PREFIX% -DCMAKE_BUILD_TYPE=%BUILD_TYPE% -DENABLE_MODULES=i -DINSTALL_PDB=%INSTALL_PDB% -DINSTALL_MANUAL=OFF -DOPENSSL_ROOT_DIR=%PREFIX% -DDEFAULT_PIDLOG="../../logs/httpd.pid" -DDEFAULT_SCOREBOARD="../../logs/apache_runtime_status" -DDEFAULT_ERRORLOG="../../logs/apache/error.log" -DAP_TYPES_CONFIG_FILE="../../etc/apache/mime.types" -DSERVER_CONFIG_FILE="../../etc/apache/httpd.conf"
+  set HTTPD_CMAKE_OPTS=-DCMAKE_INSTALL_PREFIX=%PREFIX% -DCMAKE_BUILD_TYPE=%BUILD_TYPE% -DENABLE_MODULES=i -DINSTALL_PDB=%INSTALL_PDB% -DINSTALL_MANUAL=OFF -DOPENSSL_ROOT_DIR=%PREFIX% -DZLIB_ROOT=%PREFIX% -DZLIB_INCLUDE_DIR=%PREFIX%/include -DZLIB_LIBRARY=%PREFIX%/lib/zlib.lib -DLIBXML2_INCLUDE_DIR=%PREFIX%/include/libxml2 -DLIBXML2_LIBRARY=%PREFIX%/lib/libxml2.lib -DDEFAULT_PIDLOG="../../logs/httpd.pid" -DDEFAULT_SCOREBOARD="../../logs/apache_runtime_status" -DDEFAULT_ERRORLOG="../../logs/apache/error.log" -DAP_TYPES_CONFIG_FILE="../../etc/apache/mime.types" -DSERVER_CONFIG_FILE="../../etc/apache/httpd.conf"
   call :build_package %HTTPD% "!HTTPD_CMAKE_OPTS!" & if not !STATUS! == 0 exit /b !STATUS!
 
   rem Install additional support scripts.
@@ -673,6 +675,13 @@ findstr /i /c:"libexpat-1__.dll" "%DEPENDENCY_REPORT%" > nul
 if not errorlevel 1 (
   echo ERROR: libaprutil-1.dll imports Strawberry Perl's libexpat-1__.dll.
   type "%DEPENDENCY_REPORT%"
+  set STATUS=1
+  exit /b !STATUS!
+)
+
+powershell -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%tools\verify_portable_dependencies.ps1" -Root "%PREFIX%"
+if errorlevel 1 (
+  echo ERROR: Packaged runtime dependency closure validation failed.
   set STATUS=1
   exit /b !STATUS!
 )
@@ -775,8 +784,11 @@ if exist "%BUILD_BASE%\!PACKAGE!" (
 
   rem Run CMake to create an NMake makefile, which we then process.
 
-  cmake -G "NMake Makefiles" %~2 -S "!SRC_DIR!" -B . & call :get_status
+  cmake -G "NMake Makefiles" !SERVBAY_CMAKE_FIND_OPTS! %~2 -S "!SRC_DIR!" -B . & call :get_status
   if !STATUS! == 0 (
+    call :reject_strawberry_cmake_cache
+    if not !STATUS! == 0 exit /b !STATUS!
+
     nmake & call :get_status
     if !STATUS! == 0 (
       nmake install & call :get_status
@@ -799,3 +811,21 @@ if exist "%BUILD_BASE%\!PACKAGE!" (
   exit /b 1
 )
 exit /b
+
+rem ------------------------------------------------------------------------------
+rem
+rem Reject any CMake dependency resolved from Strawberry Perl's C toolchain.
+
+:reject_strawberry_cmake_cache
+
+set "STRAWBERRY_CACHE_REPORT=%BUILD_BASE%\!PACKAGE!-strawberry-cache.txt"
+findstr /i /c:"C:/Strawberry/c/" /c:"C:\Strawberry\c" CMakeCache.txt > "!STRAWBERRY_CACHE_REPORT!"
+if not errorlevel 1 (
+  echo ERROR: CMake resolved !PACKAGE! dependencies from Strawberry Perl's C toolchain.
+  type "!STRAWBERRY_CACHE_REPORT!"
+  set STATUS=1
+  exit /b !STATUS!
+)
+
+set STATUS=0
+exit /b !STATUS!
