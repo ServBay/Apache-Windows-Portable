@@ -24,6 +24,7 @@ class ApacheWindowsBuildContractTests(unittest.TestCase):
         self.assertIn("-DCMAKE_IGNORE_PREFIX_PATH=C:/Strawberry/c", options)
         self.assertIn("-DCMAKE_FIND_USE_PACKAGE_REGISTRY=OFF", options)
         self.assertIn("-DCMAKE_FIND_USE_SYSTEM_PACKAGE_REGISTRY=OFF", options)
+        self.assertIn("-DCMAKE_POLICY_VERSION_MINIMUM=3.5", options)
         self.assertIn("call :reject_strawberry_cmake_cache", script)
 
     def test_zlib_and_libxml2_consumers_link_the_bundled_import_libraries(self):
