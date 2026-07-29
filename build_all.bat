@@ -489,7 +489,9 @@ if !STATUS! == 0 (
     )
   )
 
-  set APR-UTIL_CMAKE_OPTS=-DCMAKE_INSTALL_PREFIX=%PREFIX% -DOPENSSL_ROOT_DIR=%PREFIX% -DCMAKE_BUILD_TYPE=%BUILD_TYPE% -DAPU_HAVE_CRYPTO=ON -DAPR_BUILD_TESTAPR=OFF -DINSTALL_PDB=%INSTALL_PDB%
+  rem FindEXPAT otherwise prefers Strawberry Perl's MinGW import library from PATH.
+  rem Pin APR-util to the Expat library built and installed by this script.
+  set APR-UTIL_CMAKE_OPTS=-DCMAKE_INSTALL_PREFIX=%PREFIX% -DOPENSSL_ROOT_DIR=%PREFIX% -DEXPAT_INCLUDE_DIR=%PREFIX%/include -DEXPAT_LIBRARY=%PREFIX%/lib/libexpat.lib -DCMAKE_BUILD_TYPE=%BUILD_TYPE% -DAPU_HAVE_CRYPTO=ON -DAPR_BUILD_TESTAPR=OFF -DINSTALL_PDB=%INSTALL_PDB%
   call :build_package %APR-UTIL% "!APR-UTIL_CMAKE_OPTS!" & if not !STATUS! == 0 exit /b !STATUS!
 )
 
@@ -627,7 +629,66 @@ if !STATUS! == 0 (
   call :build_package %MOD_FCGID% "!MOD_FCGID_CMAKE_OPTS!" modules\fcgid & if not !STATUS! == 0 exit /b !STATUS!
 )
 
+call :verify_portable_runtime_dependencies
+if not !STATUS! == 0 exit /b !STATUS!
+
 echo Build finished with status: !STATUS!
+exit /b !STATUS!
+
+rem ------------------------------------------------------------------------------
+rem
+rem Verify that the packaged runtime is independent of Strawberry Perl.
+
+:verify_portable_runtime_dependencies
+
+set "DEPENDENCY_REPORT=%BUILD_BASE%\apr-util-dependencies.txt"
+if not exist "%PREFIX%\bin\libaprutil-1.dll" (
+  echo ERROR: "%PREFIX%\bin\libaprutil-1.dll" was not installed.
+  set STATUS=1
+  exit /b !STATUS!
+)
+if not exist "%PREFIX%\bin\libexpat.dll" (
+  echo ERROR: "%PREFIX%\bin\libexpat.dll" was not installed.
+  set STATUS=1
+  exit /b !STATUS!
+)
+
+dumpbin /dependents "%PREFIX%\bin\libaprutil-1.dll" > "%DEPENDENCY_REPORT%" 2>&1
+if errorlevel 1 (
+  echo ERROR: dumpbin failed while inspecting libaprutil-1.dll.
+  type "%DEPENDENCY_REPORT%"
+  set STATUS=1
+  exit /b !STATUS!
+)
+
+findstr /i /c:"libexpat.dll" "%DEPENDENCY_REPORT%" > nul
+if errorlevel 1 (
+  echo ERROR: libaprutil-1.dll does not import the packaged libexpat.dll.
+  type "%DEPENDENCY_REPORT%"
+  set STATUS=1
+  exit /b !STATUS!
+)
+
+findstr /i /c:"libexpat-1__.dll" "%DEPENDENCY_REPORT%" > nul
+if not errorlevel 1 (
+  echo ERROR: libaprutil-1.dll imports Strawberry Perl's libexpat-1__.dll.
+  type "%DEPENDENCY_REPORT%"
+  set STATUS=1
+  exit /b !STATUS!
+)
+
+set "ORIGINAL_PATH=!PATH!"
+set "PATH=%PREFIX%\bin;%SystemRoot%\System32;%SystemRoot%"
+"%PREFIX%\bin\httpd.exe" -v
+set "HTTPD_SMOKE_STATUS=!ERRORLEVEL!"
+set "PATH=!ORIGINAL_PATH!"
+if not "!HTTPD_SMOKE_STATUS!" == "0" (
+  echo ERROR: httpd.exe failed outside the Strawberry Perl PATH.
+  set STATUS=1
+  exit /b !STATUS!
+)
+
+set STATUS=0
 exit /b !STATUS!
 
 rem ------------------------------------------------------------------------------
